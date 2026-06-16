@@ -568,36 +568,177 @@
 
     - Диагностика – через ```/proc``` и ```/sys``` получать информацию о системе без дополнительных утилит
 
-## Настройка сети в различных системах управления сетью
+# Этап 0. Углубление Linux (фундамент)
 
-### IP
+## 0.1. Управление процессами и ресурсами
+- Команды: `ps`, `pstree`, `top`, `htop`, `glances`, `kill`, `killall`, `pkill`, `nice`, `renice`, `nohup`, `screen`, `tmux`
+- Системные вызовы: `fork`, `exec`, `wait`
+- Ограничения ресурсов: `ulimit`, `/etc/security/limits.conf`
+- Практика: мониторинг загрузки, завершение «зависших» процессов, фоновый запуск задач
 
-### Netplan
+## 0.2. Управление пакетами
+- Debian: `apt`, `apt-get`, `dpkg`, репозитории, ключи
+- RHEL: `yum`, `dnf`, `rpm`
+- Универсальные: `snap`, `flatpak`
+- Сборка из исходников: `make`, `cmake`
+- Практика: установка/удаление/обновление, разрешение зависимостей
 
-### Networking
+## 0.3. Пользователи, группы и права
+- Команды: `useradd`, `usermod`, `userdel`, `groupadd`, `passwd`, `chown`, `chgrp`, `chmod` (числовой и символьный), `umask`
+- Специальные биты: SUID, SGID, Sticky bit
+- ACL: `setfacl`, `getfacl`
+- Sudo: `/etc/sudoers`, `visudo`
+- Практика: создание пользователей с ограниченными правами, настройка sudo для группы админов
 
-### Firewalls
+## 0.4. Память, диски, файловые системы (расширение)
+- Разметка дисков: `fdisk`, `gdisk`, `parted`
+- Создание ФС: `mkfs.ext4`, `mkfs.xfs`, `mkswap`
+- Монтирование: `mount`, `umount`, `/etc/fstab`, опции (`noatime`, `rw`, `ro`)
+- LVM: PV, VG, LV, расширение/уменьшение томов
+- Software RAID: `mdadm` – создание, управление, мониторинг
+- Проверка ФС: `fsck`, `tune2fs`
+- Квоты: `quota`, `repquota`
+- Swap-файлы и разделы
+- Практика: добавить новый диск, создать LVM-том, настроить автоподключение
 
-## Сервисы и периодические задачи
+## 0.5. Сеть (полноценно)
+- Утилиты: `ping`, `traceroute`, `mtr`, `nmap`, `netstat`, `ss`, `tcpdump`, `tshark`, `curl`, `wget`
+- Настройка интерфейсов: `ip` (addr, link, route), `ifconfig` (устаревает), файлы `/etc/network/interfaces`, Netplan, NetworkManager
+- DNS: `/etc/resolv.conf`, `host`, `dig`, `nslookup`
+- Маршрутизация: `ip route`, добавление шлюза по умолчанию
+- Файрволы: `iptables` (цепочки, правила, NAT), `nftables`, `ufw`, `firewalld` (зоны)
+- Практика: статический IP, открытие портов, проброс портов, захват трафика
 
-### Systemd
+## 0.6. Системные логи и журналирование
+- `journalctl` – фильтры, просмотр за период, реальное время
+- Традиционные логи: `/var/log/` – syslog, auth.log, kern.log, dmesg
+- Ротация: `logrotate` – конфиги, периодичность, сжатие
+- Практика: анализ логов, настройка ротации для своего приложения
 
-### Cron
+# Этап 1. Автоматизация на Bash и Python
 
-## Файловая система
+## 1.1. Bash-скрипты (углублённо)
+- Переменные, массивы, ассоциативные массивы
+- Условные операторы: `if-then-else`, `case`
+- Циклы: `for`, `while`, `until`
+- Функции, области видимости
+- Обработка сигналов (`trap`)
+- Параметры скрипта: `$1`, `$@`, `getopts`
+- Регулярные выражения в `grep`/`sed`/`awk`
+- `sed` – редактирование потока; `awk` – обработка структурированного текста
+- `jq` – работа с JSON
+- Отладка: `set -x`, `set -e`, `trap ERR`
+- Практика: скрипт бекапа с ротацией, сбор системной информации, развёртывание приложения
 
-### Система на диске
+## 1.2. Python для DevOps
+- Основы синтаксиса, строки, списки, словари
+- Модули: `os`, `sys`, `subprocess`, `shutil`, `pathlib`, `argparse`, `logging`, `json`, `yaml`, `requests`
+- Работа с файлами, парсинг логов
+- Виртуальные окружения (`venv`), менеджеры пакетов (`pip`, `poetry`)
+- Практика: скрипт инвентаризации через API облака, обёртка над Terraform, Telegram-бот для мониторинга
 
-### Логические файловые системы
+# Этап 2. Сервисы и планировщики
 
-### Рейды
+## 2.1. Systemd (глубоко)
+- Управление: `systemctl start/stop/restart/enable/disable/status`
+- Написание unit-файлов (сервисы, таймеры, сокеты, маунты)
+- Зависимости, таргеты
+- `systemd-analyze` – диагностика загрузки
+- `journalctl` – расширенное использование
+- Практика: создать свой сервис, настроить автоперезапуск, таймер для периодических задач
 
-### Управление рейдами
+## 2.2. Cron и systemd timers
+- Синтаксис crontab, специальные строки (`@reboot`)
+- Ограничения cron, переход на systemd timers
+- Практика: ежедневный бекап, ежеминутный сбор метрик
 
-### Best-practice
+# Этап 3. Управление конфигурацией – Ansible
 
-## Контейнеризация
+- Архитектура: управляющий узел, инвентори (статический/динамический), модули
+- Плейбуки: tasks, handlers, vars, facts
+- Роли и зависимости, Ansible Galaxy
+- Шаблоны Jinja2
+- Интеграция с облаками через модули
+- Best practices: идемпотентность, разделение на роли, vault для секретов
+- Практика: автоматизация установки Nginx, MySQL, Docker на группе серверов; написание роли для приложения
 
-### cname
+# Этап 4. Контейнеризация и оркестрация
 
-### cgroups
+## 4.1. Docker
+- Образы: Dockerfile, оптимизация слоёв, сборка, тегирование, реестры (Docker Hub, private)
+- Управление контейнерами: `docker run`, `exec`, `logs`, `inspect`, `commit`
+- Сети: bridge, host, overlay, пользовательские
+- Тома: volumes, bind mounts, tmpfs
+- Docker Compose: описание многоконтейнерных приложений
+- Практика: контейнеризация веб-приложения с БД, сети, тома, compose
+
+## 4.2. Kubernetes (основы)
+- Архитектура: master (API, scheduler, controller-manager, etcd) и worker nodes (kubelet, kube-proxy)
+- Ресурсы: Pod, Deployment, Service (ClusterIP, NodePort, LoadBalancer), Ingress, ConfigMap, Secret, PersistentVolume, StatefulSet
+- `kubectl`: create, apply, get, describe, logs, exec
+- Helm: чарты, шаблонизация
+- Практика: развернуть кластер (minikube/k3s), запустить приложение с репликами, настроить Ingress и TLS, обновление через rollout
+
+# Этап 5. Инфраструктура как код (IaC)
+
+## 5.1. Terraform
+- Провайдеры, ресурсы, переменные, выходные данные, состояние (локальное/удалённое)
+- Жизненный цикл: `init`, `plan`, `apply`, `destroy`
+- Модули: создание и использование
+- Работа с несколькими облаками (AWS, GCP, Azure) и локальными (vSphere, Docker)
+- Практика: создать VPC, подсети, EC2, RDS в AWS (или аналоги)
+
+## 5.2. Дополнительные инструменты
+- Pulumi (альтернатива на языках программирования)
+- CloudFormation (AWS)
+- Packer (сборка золотых образов)
+
+# Этап 6. CI/CD (непрерывная интеграция и доставка)
+
+- Концепции: пайплайн, стадии, триггеры, артефакты, окружения (dev/staging/prod)
+- Инструменты: Jenkins (Pipeline as Code – Jenkinsfile), GitLab CI (`.gitlab-ci.yml`), GitHub Actions (workflows), Drone, ArgoCD
+- Интеграция с тестированием (unit, integration, security)
+- Деплой в Kubernetes через Helm или `kubectl`
+- Практика: автоматическая сборка Docker-образа при пуше, прогон тестов, деплой в dev-окружение
+
+# Этап 7. Мониторинг и логирование
+
+## 7.1. Мониторинг метрик (Prometheus + Grafana)
+- Установка Prometheus, настройка scrape, экспортёры (node_exporter, blackbox_exporter)
+- Сбор метрик с приложений
+- Настройка Grafana: дашборды, панели, алерты
+- Практика: мониторинг CPU, RAM, диска, сети; дашборда для приложения
+
+## 7.2. Централизованное логирование (ELK/EFK)
+- Elasticsearch, Logstash/Fluentd, Kibana
+- Структурированные логи (JSON), фильтрация, парсинг
+- Практика: сбор логов со всех серверов в Elasticsearch, визуализация в Kibana
+
+## 7.3. Alerting
+- Alertmanager с Prometheus, правила, маршрутизация (Email, Slack, PagerDuty)
+
+# Этап 8. Облачные провайдеры и гибридные среды
+
+- Выберите основной провайдер (AWS – наиболее востребован, затем GCP/Azure)
+- Ключевые сервисы: Compute (EC2, GCE), Storage (S3, EBS, EFS), Networking (VPC, SG, ELB), Database (RDS, DynamoDB), IAM (политики, роли)
+- AWS дополнительно: ECS/EKS, Lambda, CloudFront, Route53, SQS/SNS
+- Практика: создать инфраструктуру приложения в облаке через Terraform
+
+# Этап 9. Безопасность в DevOps (DevSecOps)
+
+- Управление секретами: HashiCorp Vault, AWS Secrets Manager, Kubernetes Secrets
+- Безопасность контейнеров: сканирование образов (Trivy, Clair), PodSecurity Policies
+- Безопасность пайплайнов: SAST/DAST (SonarQube)
+- SSL/TLS: Let's Encrypt, cert-manager в Kubernetes
+- Принцип наименьших привилегий, OWASP Top 10
+- Практика: внедрить Vault для динамических секретов
+
+# Этап 10. Дополнительные навыки и инструменты
+
+- **Git** – продвинутое использование: rebase, cherry-pick, стратегии ветвления (GitFlow, GitHub Flow)
+- **Документация** – README, схемы архитектуры, runbooks
+- **Командная работа** – Agile, Scrum, Jira/Confluence
+- **Траблшутинг** – системный подход, `strace`, `ltrace`, `perf`
+- **Базы данных** – SQL (SELECT, JOIN, индексы), репликация, бэкапы (PostgreSQL/MySQL)
+- **Сети L7** – прокси (nginx, haproxy), балансировщики, сервис-меш (Istio, Linkerd)
+
