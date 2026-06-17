@@ -2352,21 +2352,819 @@ using System.Net;             // IPAddress, IPEndPoint, Dns
     * В большинстве случаев - бесполезны. Для управляемых ресурсов лучше использовать `IDisposable` или `SafeHandle`
 
 - Модификаторы доступа
+  
+  Каждый член класса, будь то метод, поле или свойство имеет модификатор доступа, определяющий то, откуда можно получить доступ к данному члену класса.
+
+  Перечень модификаторов:
+
+  - `public` - член класса доступен откуда угодно
+  - `private` - (по умолчанию, если не указано другое) доступен изнутри класса
+  - `protected` - изнутри класса или его наследников
+  - `internal` - только в пределах текущей сборки (`assembly`) - если собирается dll, то вне этого dll доступа нет.
+  - `protected internal` - внутри экземпляра класса или наследниках в пределах текущей сборки (`assembly`) - если собирается dll, то вне этого dll доступа нет.
+  - `private protected` - внутри экземпляра и только в наследниках
+
+  Так же модификаторы могут применяться непосредственно к классам, тогда область видимости определяется пространством имён, в котором определён класс.
+
+  - `public` - доступен в любых пространствах имён, в которые подключено то пространство, в котором объявлен класс
+  - `internal` - доступен только в текущей сборке (`assembly`) - если собирается dll, то вне этого dll доступа нет.
+
 - Static-классы, поля, методы
+  
+    Статические классы - класс, у которого нет экземпляров, все его члены должны быть статическими и наследники так же должны быть статическими.
+    
+    ```csharp
+    public static class MathUtils
+    {
+        public static double Pi => 3.14159;
+        
+        public static int Add(int a, int b) => a + b; // inline метод
+    }
+
+    // Использование
+    double pi = MathUtils.Pi;
+    int sum = MathUtils.Add(5, 3);
+    ```
+
+    У не статических классов могут быть статические методы или поля, которые принадлежат не экземплярам, а классу в целом и общие для всех не статических членов класса. Т.е. не статические члены класса индивидуальны для экземпляров этого класса, а статические члены существуют в единственном экземпляре для всех.
+
+    ```csharp
+      public class Stuff(string name, decimal payment){
+        // Статическое полу
+        public static string Company = "CSharp inc."; 
+        // Здесь Primary constructor инициализация
+        public string Name = name;
+        public decimal Salary = payment;
+        // Статический методы
+        public static string GetCompanyName() => Company;
+        public decimal GetSalary() => this.Salary;
+      }
+
+      Stuff person1 = new Stuff("John Doe", 10.5m);
+      Stuff person2 = new Stuff("Caren", 15.25m);
+      // Обращение к нестатическому методу
+      Console.WriteLine(person1.GetSalary());
+      // Обращение к статическому методу, возвращающему статическое поле.
+      Console.WriteLine(Stuff.GetCompanyName());
+    ```
+
 - Соглашение об именовании переменных, классов, методов, пространств имён, пакетов. 
 
-### Статические классы и статические члены
+    В методологии разработки любого программного продукта отдельное внимание уделяется соглашению об именовании, чаще всего принимается соглашение, используемое непосредственными разработчиками языка. Соглашение языка C# указано ниже. Оно сложилось исторически, потому может содержать некоторые спорные аспекты:
+
+    - Классы `PascalCase` прим: CustomService, BankAccount
+    - Методы `PascalCase` прим: VerbalName(), CalculateTotal() - обязательно использование глагола. То, что без глагола - не метод, а поле или свойство
+    - Публичные свойства `PascalCase`
+    - Публичные поля (редкое явление, лучше всегда оборачивать приватные поля свойствами через Backing field) `PascalCase`
+    - Приватные поля `_camelCase`
+    - Параметры методов `camelCase`
+    - Локальные переменные `camelCase`
+    - Константы `PascalCase`
+    - Интерфейсы `IPascalCase` прим: IRepository, ILogger
+    - Пространства имён `PascalCase`
+
+Комплексный пример по базе классов:
+
+```csharp
+// Соглашение: классы в PascalCase
+public class BankAccount
+{
+    // Приватные поля: _camelCase
+    private string _accountNumber;
+    private decimal _balance;
+    private static int _totalAccounts = 0; // Статическое поле
+    
+    // Публичные свойства: PascalCase
+    public string AccountNumber => _accountNumber; // Только для чтения
+    public decimal Balance { get; private set; }   // Сеттер приватный
+    
+    // Auto-property с init (C# 9+)
+    public DateTime CreatedAt { get; init; }
+    
+    // Primary constructor (C# 12+) — можно сразу объявить параметры
+    public BankAccount(string accountNumber, decimal initialBalance)
+    {
+        _accountNumber = accountNumber;
+        _balance = initialBalance;
+        Balance = initialBalance;
+        CreatedAt = DateTime.Now;
+        _totalAccounts++;
+    }
+    
+    // Методы: PascalCase
+    public void Deposit(decimal amount)
+    {
+        if (amount <= 0)
+            throw new ArgumentException("Сумма должна быть положительной");
+        _balance += amount;
+        Balance = _balance;
+    }
+    
+    public void Withdraw(decimal amount)
+    {
+        if (amount <= 0)
+            throw new ArgumentException("Сумма должна быть положительной");
+        if (amount > _balance)
+            throw new InvalidOperationException("Недостаточно средств");
+        _balance -= amount;
+        Balance = _balance;
+    }
+    
+    // Статический метод
+    public static int GetTotalAccounts() => _totalAccounts;
+}
+
+// Использование
+var account = new BankAccount("12345", 1000m);
+account.Deposit(500m);
+account.Withdraw(200m);
+Console.WriteLine($"Баланс: {account.Balance}");
+Console.WriteLine($"Всего счетов: {BankAccount.GetTotalAccounts()}");
+``` 
 
 ### Интерфейсы
-- Методы, свойства, события в интерфейсах
-- Реализация по умолчанию (default interface methods)
-- Стандартные интерфейсы: `IComparable`, `IEquatable`, `IDisposable`
 
-### Инкапсуляция
-- Модификаторы доступа: `public`, `private`, `protected`, `internal`, `protected internal`, `private protected`
-- Свойства как шлюз доступа
+Интерфейс - объявление контракта, предписывающего классу, который его реализует перечень методов, свойств, событий и индексаторов, которые он обязан реализовать. Класс, реализующий интерфейс может быть приведён к типу интерфейса, что позволяет множеству различных типов данных быть обработанными единым набором алгоритмов. Единый интерфейс взаимодействия - различная реализация.  
+
+Интерфейс сам по себе не обязан реализовывать поведение по умолчанию (но так тоже можно) и не должен, в идеале, это делать. Интерфейсы позволяют классам реализовывать множество контрактов, что критически важно для полиморфизма, ввиду того, что C# не поддерживает множественное наследование, но поддерживает множественную реализацию интерфейсов.
+
+- Объявление интерфейса
+  
+    ```csharp
+    public interface ILogger{
+      void Log(string message);
+      string Name {get;}
+    }
+    ```
+
+    Имя интерфейса должно начинаться с заглавной буквы `I` 
+    Члены интерфейса по умолчанию `public`
+
+    В интерфейсах нельзя объявить: `поля`, `коснтрукторы`, `финализаторы`
+
+- Реализация интерфейса
+  
+     ```csharp
+     public class ConsoleLogger : ILogger
+     {
+         public string Name => "Console";
+         
+         public void Log(string message)
+         {
+             Console.WriteLine($"[{Name}] {message}");
+         }
+     }
+ 
+     public class FileLogger : ILogger
+     {
+         public string Name => "File";
+         
+         public void Log(string message)
+         {
+             // Запись в файл
+             Console.WriteLine($"[{Name}] Writing to file: {message}");
+         }
+     }
+
+    // Использование
+    ILogger logger = new ConsoleLogger();
+    logger.Log("Application started");  // [Console] Application started
+     ```
+
+    Так же класс может реализовывать множетсво интерфейсов:
+
+    ```csharp
+    public interface ICanDrive
+    {
+        void Drive();
+    }
+
+    public interface ICanFly
+    {
+        void Fly();
+    }
+
+    public class FlyingCar : ICanDrive, ICanFly
+    {
+        public void Drive() => Console.WriteLine("Driving on the road");
+        public void Fly() => Console.WriteLine("Flying in the sky");
+    }
+
+    // Использование
+    FlyingCar car = new FlyingCar();
+    car.Drive();  // Driving on the road
+    car.Fly();    // Flying in the sky
+    ```
+
+- Свойства в полях
+
+    Интерфейс может объявлять свойства, класс, реализующий данный интерфейс может добавлять акссессоры к объявленным свойствам.
+
+  ```csharp
+  public interface IPerson
+  {
+      string Name { get; }          // Только чтение
+      int Age { get; set; }         // Чтение и запись
+  }
+
+  public class Employee : IPerson
+  {
+      public string Name { get; set; }  // Добавили set, хотя в интерфейсе только get — допустимо
+      public int Age { get; set; }
+  }
+  ```
+
+- События в интерфейсах
+
+  Интерфейсы могут объявлять события
+
+  ```csharp
+  public interface INotifyPropertyChanged
+  {
+      event EventHandler PropertyChanged;
+  }
+
+  public class Person : INotifyPropertyChanged
+  {
+      private string _name;
+      
+      public event EventHandler PropertyChanged;
+      
+      public string Name
+      {
+          get => _name;
+          set
+          {
+              _name = value;
+              PropertyChanged?.Invoke(this, EventArgs.Empty);
+          }
+      }
+  }
+  ```
+
+  При реализации нескольких интерфейсов с одинаковыми по имени событиями, требуется явная реализация.
+
+- Явная реализация - реализация с указанием интерфейса к которому относится реализация метода. 
+  
+  При явной реализации:
+  
+  * Член не имеет модификатора доступа, он не может быть публичным
+  * Член доступен только через приведение к интерфейсу
+
+  ```csharp
+  public interface IMetric
+  {
+      double GetDistance();   // Возвращает метры
+  }
+
+  public interface IImperial
+  {
+      double GetDistance();   // Возвращает футы
+  }
+
+  public class Runway : IMetric, IImperial
+  {
+      private double _meters;
+      
+      public Runway(double meters) => _meters = meters;
+      
+      // Явная реализация для IMetric
+      double IMetric.GetDistance() => _meters;
+      
+      // Явная реализация для IImperial
+      double IImperial.GetDistance() => _meters * 3.28084;
+  }
+
+  // Использование
+  Runway runway = new Runway(1000);
+  // runway.GetDistance();  // Ошибка! Метод недоступен через экземпляр класса
+
+  IMetric metric = runway;
+  Console.WriteLine(metric.GetDistance());  // 1000
+
+  IImperial imperial = runway;
+  Console.WriteLine(imperial.GetDistance()); // 3280.84
+  ```
+
+  Явная реализация используется для сокрытия реализуемых методов, разрешения конфликтов имён реализуемых интерфейсов, обеспечения чистоты публичного интерфейса класса.
+
+- с C# 8 можно использовать реализацию по умолчанию. 
+
+  ```csharp
+  public interface ICustomer
+  {
+      string Name { get; }
+      DateTime DateJoined { get; }
+      IEnumerable<Order> PreviousOrders { get; }
+      
+      // Метод с реализацией по умолчанию (C# 8+)
+      decimal GetLoyaltyDiscount()
+      {
+          // Базовая логика: 5% скидка для клиентов с более чем 10 заказами
+          int orderCount = PreviousOrders?.Count() ?? 0;
+          return orderCount > 10 ? 0.05m : 0m;
+      }
+  }
+
+  public class RegularCustomer : ICustomer
+  {
+      public string Name { get; set; }
+      public DateTime DateJoined { get; set; }
+      public IEnumerable<Order> PreviousOrders { get; set; }
+      
+      // GetLoyaltyDiscount использует реализацию по умолчанию
+  }
+
+  public class PremiumCustomer : ICustomer
+  {
+      public string Name { get; set; }
+      public DateTime DateJoined { get; set; }
+      public IEnumerable<Order> PreviousOrders { get; set; }
+      
+      // Переопределяем реализацию по умолчанию
+      public decimal GetLoyaltyDiscount()
+      {
+          int orderCount = PreviousOrders?.Count() ?? 0;
+          return orderCount > 5 ? 0.15m : 0m;  // 15% скидка для премиум-клиентов
+      }
+  }
+  ```
+
+  Позволяет расширять функциональность не внося изменения в реализации. Т.к. при уже существующей реализации в классе, реализация по умолчанию из интерфейса переписывается, т.к. она `virtual`, т.е. поддерживает перегрузку. 
+
+- Стандартные интерфейсы .Net и примеры их реализации
+
+  - `IComparable<T>` — сравнение объектов
+    
+    ```csharp
+    public class Person : IComparable<Person>
+    {
+        public string Name { get; set; }
+        public int Age { get; set; }
+        
+        // Возвращает:
+        // < 0 — текущий объект меньше other
+        // 0 — объекты равны
+        // > 0 — текущий объект больше other
+        public int CompareTo(Person? other)
+        {
+            if (other is null) return 1;
+            return Age.CompareTo(other.Age);  // Сортировка по возрасту
+        }
+    }
+
+    // Использование
+    List<Person> people = new List<Person>
+    {
+        new Person { Name = "Alice", Age = 30 },
+        new Person { Name = "Bob", Age = 25 },
+        new Person { Name = "Charlie", Age = 35 }
+    };
+
+    people.Sort();  // Сортировка по возрасту (25, 30, 35)
+    ```
+
+  - `IEquatable<T>` — сравнение на равенство
+    
+    ```csharp
+    public class Car : IEquatable<Car>
+    {
+        public string Make { get; set; }
+        public string Model { get; set; }
+        public int Year { get; set; }
+        
+        public bool Equals(Car? other)
+        {
+            if (other is null) return false;
+            if (ReferenceEquals(this, other)) return true;
+            return Make == other.Make && Model == other.Model && Year == other.Year;
+        }
+        
+        public override bool Equals(object? obj)
+        {
+            return Equals(obj as Car);
+        }
+        
+        public override int GetHashCode()
+        {
+            return HashCode.Combine(Make, Model, Year);
+        }
+    }
+
+    // Использование
+    Car car1 = new Car { Make = "Toyota", Model = "Camry", Year = 2020 };
+    Car car2 = new Car { Make = "Toyota", Model = "Camry", Year = 2020 };
+
+    bool areEqual = car1.Equals(car2);  // true
+    ```
+
+  - `IDisposable` — освобождение ресурсов
+    
+    ```csharp
+    public class ResourceHolder : IDisposable
+    {
+        private bool _disposed = false;
+        private IntPtr _nativeResource;  // Пример неуправляемого ресурса
+        
+        public ResourceHolder()
+        {
+            // Выделение ресурса
+            _nativeResource = Marshal.AllocHGlobal(100);
+        }
+        
+        public void Dispose()
+        {
+            Dispose(true);
+            GC.SuppressFinalize(this);
+        }
+        
+        protected virtual void Dispose(bool disposing)
+        {
+            if (!_disposed)
+            {
+                if (disposing)
+                {
+                    // Освобождение управляемых ресурсов
+                }
+                
+                // Освобождение неуправляемых ресурсов
+                if (_nativeResource != IntPtr.Zero)
+                {
+                    Marshal.FreeHGlobal(_nativeResource);
+                    _nativeResource = IntPtr.Zero;
+                }
+                
+                _disposed = true;
+            }
+        }
+        
+        ~ResourceHolder()
+        {
+            Dispose(false);
+        }
+    }
+
+    // Использование
+    using (var holder = new ResourceHolder())
+    {
+        // Работа с ресурсом
+    }  // Dispose() вызывается автоматически
+    ```
+  
+  - `IEnumerable<T>` — итерация по коллекции
+
+    ```csharp
+    public class MyCollection : IEnumerable<int>
+    {
+        private int[] _items = { 1, 2, 3, 4, 5 };
+        
+        public IEnumerator<int> GetEnumerator()
+        {
+            for (int i = 0; i < _items.Length; i++)
+            {
+                yield return _items[i];
+            }
+        }
+        
+        // Необобщённая версия для поддержки foreach
+        IEnumerator IEnumerable.GetEnumerator()
+        {
+            return GetEnumerator();
+        }
+    }
+
+    // Использование
+    MyCollection collection = new MyCollection();
+    foreach (int item in collection)
+    {
+        Console.WriteLine(item);  // 1, 2, 3, 4, 5
+    }
+    ```
+
+- Ниже приведён комплексный пример, показывающий использование описанного в разделе материала:
+  
+   ```csharp
+   // 1. Определение интерфейсов
+  public interface IShape
+  {
+      double Area { get; }
+      double Perimeter { get; }
+      string Name { get; }
+  }
+
+  public interface IColorable
+  {
+      string Color { get; set; }
+  }
+
+  public interface IComparableShape : IShape, IComparable<IComparableShape>
+  {
+      // Объединяет IShape и IComparable
+  }
+
+  // 2. Реализация класса с несколькими интерфейсами
+  public class Circle : IShape, IColorable, IComparable<Circle>
+  {
+      private double _radius;
+      private string _color;
+      
+      public Circle(double radius, string color = "Red")
+      {
+          _radius = radius;
+          _color = color;
+      }
+      
+      // IShape
+      public double Area => Math.PI * _radius * _radius;
+      public double Perimeter => 2 * Math.PI * _radius;
+      public string Name => "Circle";
+      
+      // IColorable
+      public string Color
+      {
+          get => _color;
+          set => _color = value;
+      }
+      
+      // IComparable<Circle>
+      public int CompareTo(Circle? other)
+      {
+          if (other is null) return 1;
+          return Area.CompareTo(other.Area);
+      }
+      
+      public override string ToString()
+      {
+          return $"{Name} (Color: {Color}, Area: {Area:F2}, Perimeter: {Perimeter:F2})";
+      }
+  }
+
+  // 3. Использование
+  class Program
+  {
+      static void Main()
+      {
+          List<Circle> circles = new List<Circle>
+          {
+              new Circle(5.0, "Blue"),
+              new Circle(3.0, "Green"),
+              new Circle(7.0, "Red")
+          };
+          
+          // Сортировка по площади (IComparable)
+          circles.Sort();
+          
+          foreach (var circle in circles)
+          {
+              Console.WriteLine(circle);
+          }
+          
+          // Доступ через интерфейсы
+          IShape shape = circles[0];
+          Console.WriteLine($"Shape: {shape.Name}, Area: {shape.Area:F2}");
+          
+          IColorable colorable = circles[0];
+          colorable.Color = "Yellow";
+          Console.WriteLine($"New color: {colorable.Color}");
+      }
+  }
+   ```
 
 ### Сборщик мусора
+
+Сборщик мусора (Garbage Collector) в .Net - автоматический менеджер памяти в среде CLR (Common Language Runtime). Он управляет выделением и освобождением памяти для управляемых объектов.
+
+Сборщик мусора освобождает программиста от необходимости ручного управления памятью, что заметно повышает итоговую безопасность приложений, лишая его возможности самостоятельно выстрелить себе в колено небезопасным кодом и вызвать утечки памяти, тем не менее утечки не остаются гарантированно решенным вопросом при наличие сборщика мусора, поскольку он закрывает не все пути их возникновения. Так же сборщик мусора, являясь менеджером памяти, гарантирует, что новые значимые типы данных будут заполнены значениями по умолчанию, снимая необходимость явно инициализировать каждое значимое поле. Так же сборщик мусора гарантирует, что объект не выйдет за выделенную ему область памяти. 
+
+Код, игнорирующий сборщик мусора обязан быть помечен как небезопасный. В рамках небезопасного кода возможно ручное управление памятью. Не рекомендуется в абсолютном большинстве случаев.
+
+Важно понимать, что сборщик работает с управляемой памятью на куче (heap) и не освобождает автоматически ресурсы из неуправляемой памяти (файловые дескрипторы, сетевые сокеты, подключения к базам данных и т.п.)
+
+- Управляемая куча (Managed Heap)
+  
+  При запуске нового процесса, под его выполнение резервируется непрерывная область виртуальной памяти - управляемая куча. Ссылочные типы данных размещаются здесь. Куча содержит указатель на область в памяти, в которой будет размещён следующий новый объект. 
+
+  Куча содержит три области, которые связаны с понятием "поколение объекта". 
+
+  - Gen0 - новосозданные объекты, проверяются каждую итерацию сборщика мусора, поскольку чаще всего именно они и удаляются (многолетняя эвристика, заложенная в том числе в операционные системы, которые выгружают из кеша страницы памяти по алгоритмам типа LRU (выгрузка самой долгонеиспользованной), LFU(самой редкоиспользованной) и др., )
+  - Gen1 - объекты, пережившие одну итерацию очистки. Некоторый буфер между новосозданными и старыми объектами, проверяется реже
+  - Gen2 - объекты, пережившие Gen0 и Gen1 сборки мусора определяются сюда и проверяются реже всего, поскольку эврестически предполагается длительное использование таких объектов.
+
+Крупные объекты, размер которых превышает 85кбайт перемещаются в область Large Object Heap (LOH) и сразу в Gen2. LOH область не уплотняется для производительности работы с данными объектами. 
+
+- Принцип работы GC
+  - Фаза 1. Находятся корневые объекты (roots) - глобальные, статические переменные, локальные переменные в стеке потоков, регистры процессора. От этих корневых объектов, не имеющих родительских и находящихся в области видимости программы, строится граф. Достигнутые объекты помечаются как живые. Недостижимые - мусор.
+  - Фаза 2. Уплотнение объектов - все достижимые объекты менее 85кбайт перемещаются в начало кучи, что позволяет дефрагментировать память и оптимизировать последующий поиск непрерывного пространства для выделения памяти под новые объекты
+  - Фаза 3. Обновление ссылок - все живые ссылки обновляют свои адреса, чтобы ссылаться на новое местоположение объекта в куче.
+
+- Режимы работы GC
+  - Workstation - Десктоп приложения по умолчанию
+    - Сборка мусора в том же потоке, что и вызвал GC
+    - Поток GC конкурирует с пользовательским потоком за ресурсы для работы
+    - Используется на машинах с одним логическим процессором
+    - Может работать в режиме concurrent/background
+  - Server GC - серверные высоконагруженные приложения
+    - Использует отдельные выделенные потоки для GC
+    - Для каждого логического CPU создаётся куча и поток GC
+    - все GC-потоки работают одновременно на своих кучах
+    - Благодаря параллельности работает быстрее, чем в режиме Workstation
+    - Доступен только на многопроцессорных машинах
+    - Настройки: gcServer=true, gcConcurrent=true
+  - Background GC - фоновая работа
+    - Позволяет управляемым потокам продолжать работу во время сборки Gen2 мусора.
+    - C .Net Framework 4.5+ доступен как для Workstation так и для Server
+    - Заменяет конкурентный сборщик мусора
+    - Во время фоновой сборки Gen2 возможны внеочередные сборки Gen0 и Gen1
+
+- Финализация и `IDisposable`
+  - GC не освобождает неуправляемые ресурсы
+  - Паттерн Dispose - стандартный способ явного освобождения ресурсов
+
+    ```csharp
+    public class ResourceHolder : IDisposable
+    {
+        private bool _disposed;
+        private IntPtr _nativeResource; // неуправляемый ресурс
+        private FileStream _managedResource; // управляемый, но тоже IDisposable
+
+        // Публичный метод Dispose — вызывается явно
+        public void Dispose()
+        {
+            Dispose(true);
+            GC.SuppressFinalize(this); // отключаем финализатор
+        }
+
+        // Защищённый метод с флагом — ядро паттерна
+        protected virtual void Dispose(bool disposing)
+        {
+            if (_disposed) return;
+
+            if (disposing)
+            {
+                // Освобождаем управляемые IDisposable-ресурсы
+                _managedResource?.Dispose();
+            }
+
+            // Освобождаем неуправляемые ресурсы (всегда)
+            if (_nativeResource != IntPtr.Zero)
+            {
+                Marshal.FreeHGlobal(_nativeResource);
+                _nativeResource = IntPtr.Zero;
+            }
+
+            _disposed = true;
+        }
+
+        // Финализатор (деструктор) — страховка, если Dispose не вызвали
+        ~ResourceHolder()
+        {
+            Dispose(false);
+        }
+    }
+    ```
+
+    В указанном паттерне есть реализация `IDisposable` и __подстраховка__ `финализатора`, если `Dispose` не был вызван. 
+
+    `Dispose` НЕ вызывается автоматически, чтобы при окончании работы с объектом, для него был вызван `Dispose` необходимо использовать `using` в `краткой форме` или в `полный блок`.
+
+    Финализатор, в отличие от `Dispose` вызывается в любом случае, если `GC` не было __явно__ указано, что `объект` __не требует__ `финализации`, как показано в примере реализации `паттерна`. 
+
+    GC может отследить жизненный цикл неуправляемых ресурсов, но он не имеет понятия, как их освобождать, поэтому это обязанность программиста.
+
+    Наиболее частые примеры неуправляемых ресурсов:
+
+    * Файловые дескрипторы — хендлы открытых файлов. 
+    * Сетевые сокеты — открытые TCP/UDP-подключения. 
+    * Подключения к базам данных — объекты подключений. 
+    * Графические хендлы — Bitmap, Font, Brush, Cursor. 
+    * Дескрипторы реестра и ожидания — RegistryHandle, WaitHandle. 
+    * COM-объекты — указатели на неуправляемые COM-компоненты. 
+    * Блоки памяти, выделенные через WinAPI — память, выделенная через GlobalAlloc, LocalAlloc или CoTaskMemAlloc. 
+    * Указатели на блоки неуправляемой памяти — IntPtr, полученный из вызовов WinAPI.
+
+    Важно: Не все IntPtr указывают на неуправляемый ресурс. IntPtr — это просто число, размером с указатель. Он становится «неуправляемым ресурсом», если указывает на память или объект, выделенный вне управляемой кучи.
+
+    Правило: Если в твоём классе есть поле типа IntPtr, и ты не знаешь наверняка, что оно указывает на управляемый объект — почти всегда это неуправляемый ресурс, требующий освобождения
+
+- `Marshal` - статический класс пространства имён `System.Runtime.InteropServices`, предоставляющий методы для работы с неуправляемой памятью и взаимодействия с неуправляемым кодом (C++ библиотеки, вызовы WinAPI, работа с графическим драйвером)
+  - Имеет два основных сценария использования
+    1. Явное управление неуправляемой памятью - выделение памяти, копирование, освобождение блоков в неуправляемой области памяти
+    2. Преобразование данных между управляемым кодом и неуправляемым (маршалинг) - конвертация типов, делегатов, строк и структур при работе с WinAPI или c++ функциями.
+  - Контекст маршала, обычно, ограничивается паттерном `Dispose` следующими методами:
+    - `AllocHGlobal(int size)` / `FreeHGlobal(IntPtr ptr)` — выделение и освобождение памяти через `GlobalAlloc`.
+    - `AllocCoTaskMem(int size)` / `FreeCoTaskMem(IntPtr ptr)` — работа с памятью через COM-аллокатор.
+    - `GetLastWin32Error()` — получение кода ошибки после вызова WinAPI.
+    - `PtrToString...` / `StringTo...` — конвертация строк между управляемым и неуправляемым представлениями.
+    - `StructureToPtr` / `PtrToStructure` — преобразование структур для передачи в неуправляемый код
+  - Чаще всего это всё не понадобится. C# не для таких задач был создан. 
+  - Ниже пример маршалинга
+
+    ```csharp
+    using System;
+    using System.Runtime.InteropServices;
+
+    public class UnmanagedMemoryWrapper : IDisposable
+    {
+        private IntPtr _nativeBuffer; // указатель на неуправляемую память
+        private bool _disposed = false;
+
+        public UnmanagedMemoryWrapper(int size)
+        {
+            // Marshal.AllocHGlobal выделяет память вне управляемой кучи
+            _nativeBuffer = Marshal.AllocHGlobal(size);
+            Console.WriteLine($"Выделено {size} байт неуправляемой памяти");
+        }
+
+        public void WriteBytes(byte[] data, int offset)
+        {
+            // Запись данных в неуправляемую память
+            Marshal.Copy(data, 0, _nativeBuffer + offset, data.Length);
+        }
+
+        public byte[] ReadBytes(int offset, int length)
+        {
+            // Чтение данных из неуправляемой памяти
+            byte[] result = new byte[length];
+            Marshal.Copy(_nativeBuffer + offset, result, 0, length);
+            return result;
+        }
+
+        public void Dispose()
+        {
+            Dispose(true);
+            GC.SuppressFinalize(this);
+        }
+
+        protected virtual void Dispose(bool disposing)
+        {
+            if (!_disposed)
+            {
+                // Освобождаем неуправляемый ресурс
+                if (_nativeBuffer != IntPtr.Zero)
+                {
+                    Marshal.FreeHGlobal(_nativeBuffer);
+                    Console.WriteLine("Неуправляемая память освобождена");
+                    _nativeBuffer = IntPtr.Zero;
+                }
+                _disposed = true;
+            }
+        }
+
+        // Финализатор (страховка)
+        ~UnmanagedMemoryWrapper()
+        {
+            Dispose(false);
+        }
+    }
+
+    // Использование:
+    using (var wrapper = new UnmanagedMemoryWrapper(100))
+    {
+        wrapper.WriteBytes(new byte[] { 0x48, 0x65, 0x6C, 0x6C, 0x6F }, 0);
+        var data = wrapper.ReadBytes(0, 5);
+        Console.WriteLine(Encoding.ASCII.GetString(data)); // "Hello"
+    }
+    // Здесь `Dispose()` вызывается автоматически, память освобождается.
+    ```
+
+- Настройка GC
+  - .Net Core / .Net 5+ в `.csproj`
+
+    ```xml
+    <PropertyGroup>
+      <ServerGarbageCollection>true</ServerGarbageCollection>
+      <ConcurrentGarbageCollection>true</ConcurrentGarbageCollection>
+    </PropertyGroup>
+    ```
+
+  - .Net Framework в `app.config` 
+
+    ```xml
+    <configuration>
+      <runtime>
+        <gcServer enabled="true"/>
+        <gcConcurrent enabled="true"/>
+      </runtime>
+    </configuration>
+    ```
+
+
+### Инкапсуляция
+
+`Инкапсуляция` - *объединение* _полей_ и _методов_ в `единый объект`, __отвечающий__ за собственную `целостность`. Для обеспечения целостности используется сокрытие реализации и запрет бесконтрольного изменения объекта извне посредством `модификаторов` доступа. 
+
+`Класс` в данной концепции и является этой самой инкапсуляцией. 
+
+Модификаторы доступа:
+
+* `private` - доступ к члену класса только изнутри этого класса
+* `protected` - доступ к члену класса изнутри или из наследников класса
+* `internal`  - Только внутри текущей сборки (`assembly`) т.е. то, что собрано в `dll` с модификатором `internal` будет доступно только внутри этой `dll`
+* `public`  - доступ откуда угодно
+* `private protected` - комбинация доступа изнутри и для наследников
+* `protected internal`  - внутри сборки для наследников (наследники вне сборки не имеют доступа)
+
+Класс обязан контроллировать данные, которые в него попадают и не позволять бесконтрольно менять их извне без валидации и проверки, поэтому оптимально использовать свойства с `backing field`.
 
 ### Наследование
 - `virtual`, `override`, `abstract`, `sealed`
@@ -2388,11 +3186,6 @@ using System.Net;             // IPAddress, IPEndPoint, Dns
 - События (`event`, `EventHandler`, `EventArgs`)
 - Анонимные методы и лямбда-выражения
 - Замыкания (closures)
-
-### LINQ
-- Методы расширения: `Where`, `Select`, `OrderBy`, `GroupBy`, `Join`, `Aggregate`…
-- Query syntax
-- Отложенное выполнение, `IQueryable` vs `IEnumerable`
 
 ### Асинхронность и многопоточность
 - `async`/`await`, `Task`, `Task<T>`
@@ -2438,6 +3231,13 @@ using System.Net;             // IPAddress, IPEndPoint, Dns
 ### SOLID
 
 ## Практика создания приложения
+
+// Возможно, тут следует добавить и другие библиотеки и технологии
+
+### LINQ
+- Методы расширения: `Where`, `Select`, `OrderBy`, `GroupBy`, `Join`, `Aggregate`…
+- Query syntax
+- Отложенное выполнение, `IQueryable` vs `IEnumerable`
 
 ### ASP.NET Core Web API
 - Контроллеры / Minimal API
