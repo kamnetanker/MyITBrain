@@ -3439,18 +3439,490 @@ variable2.SayMyName(); // Haizenberg
 
 ### Generics
 
-- Generic-классы, методы, интерфейсы
-- Ограничения (`where T : class, new()` и т.д.)
-- `default(T)`, `typeof(T)`
+Generics (Обобщения) - механизм, позволяющий создавать классы, методы, структуры и интерфейсы, которые работают с обобщённым типом данных, а конкретный тип выводится на этапе компиляции через определение типов выражений. 
+
+Если простым языком, есть классы алгоритмов, для которых не важно, с каким типом данных они работают, поскольку работа этого алгоритма не зависит от типа данных, например: сортировка, выборка, фильтрация. Главное, чтобы операции, необходимые для работы алгоритма, поддерживались типом данных, самому алгоритму на тип данных - всё равно.
+
+Если можно написать единый алгоритм для множества типов данных, то это приводит к переиспользованию кода, что позволяет избавиться от дублирования кода для каждого типа данных.
+
+Объявление обобщения:
+
+```c#
+// Объявление обобщённого класса
+public class GenericList<T> // <T> - параметр типа
+{
+    public void Add(T item) { }
+}
+
+// Использование
+GenericList<int> list1 = new GenericList<int>(); // <int> - указание параметра типа 
+list1.Add(1);
+
+GenericList<string> list2 = new GenericList<string>();
+list2.Add("Hello");
+
+// Объявление обобщённого интерфейса
+public interface IRepository<T>
+{
+    T GetById(int id);
+    void Add(T entity);
+    void Delete(T entity);
+}
+
+// Реализация
+public class UserRepository : IRepository<User>
+{
+    private List<User> _users = new List<User>();
+
+    public User GetById(int id)
+        => _users.FirstOrDefault(u => u.Id == id);
+
+    public void Add(User entity) => _users.Add(entity);
+    public void Delete(User entity) => _users.Remove(entity);
+}
+
+// Использование
+IRepository<User> userRepo = new UserRepository();
+userRepo.Add(new User { Id = 1, Name = "Alice" });
+User user = userRepo.GetById(1);
+```
+
+Так же обобщения можно объявить не для класса в целом, а для отдельного метода, например:
+
+```c#
+public static class MyAlgos{
+  public static void MyAlgorithm<T>(T argument) => Console.WriteLine($"Получен тип: {typeof(T).Name}");
+}
+
+MyAlgorithm(7); //Получен тип: Int32
+```
+
+Конструкция `typeof(T)` позволяет получить объект-описание типа данных, который передан, этот объект относится к классу `Type`:
+
+```c#
+Type typeInfo = typeof(Int32);
+Console.WriteLine($"Имя: {typeInfo.Name}"); // Int32
+Console.WriteLine($"Полное имя: {typeInfo.FullName}"); // System.Int32
+Console.WriteLine($"Является ли значимым: {typeInfo.IsValueType}"); // True
+```
+
+Так же любой класс имеет метод `GetType()` возвращающий тот же объект класса `Type`, описывающий тип данных:
+
+```c#
+Int32 arg = 7;
+Console.WriteLine(arg.GetType().Name); // Int32
+```
+
+Так же можно заполнить значением по умолчанию объект обобщенного типа используя `default(T)`. Для ссылочных типов будет `null`, для числовых значимых типов будет `0`, для структур каждый член инициализируется `null` или `0` в зависимости от типа. `char` получит значение `\0` - нулевой символ, символ конца строки, терминальный символ.
+
+Код с обобщениями позволяет писать типобезопасный переиспользуемый код. Если раньше использовалась обёртка в `object`, что позволяет оборачивать любой тип, в коллекции или алгоритмы могли попасть типы, которые не поддерживались операциями с коллекцией или иным кодом, использующим коллекцию, что приводило к ошибкам. Для решения этой проблемы был введён механизм обобщений и ограничений типов.
+
+- Ковариантность `out` - позволяет использовать более производный тип, чем указано
+- Контравариантность `in` - позволяет использовать родительские типы указанного
+- Ограничение типом  
+    
+    `where T : ограничение`
+
+    Перечень ограничений:
+    - `struct` - T должен быть не нулевым значимым типом
+    - `class` - T должен быть ссылочным типом
+    - `class?` - T должен быть ссылочным типом, допускающим `null`
+    - `notnull` - T должен быть ненулевым
+    - `unmanaged` - T должен быть ненулевым неуправляемым типом
+    - `new()` - T должен иметь открытый конструктор без параметров
+    - `<базовый класс>` - T должен быть указанным классом или его наследником
+    - `<интерфейс>` - T должен реализовывать указанный интерфейс
+    - `U` - T должен быть или наследовать тип U
+
+    Общие правила: `struct` подразумевает `new()` и не может с ним комбинироваться, `new()` - указывается последним в списке ограничений, `new()` нельзя комбинировать с `struct` и `unmanaged`, `unmanaged` - подразумевает `struct` и не может комбинироваться с ним или с `new`
+
+Пример с использованием ограничений типов:
+
+```c#
+// Dog : Animal для примера
+// Ковариантный интерфейс
+public interface IProducer<out T>
+{
+    T Produce();
+}
+
+public class Producer<T> : IProducer<T>
+{
+    public T Produce() { /* ... */ }
+}
+
+// Ковариантность: IProducer<Animal> можно присвоить IProducer<Dog>
+IProducer<Animal> producer = new Producer<Dog>();
+
+
+// Контравариантный интерфейс
+public interface IConsumer<in T>
+{
+    void Consume(T item);
+}
+
+public class Consumer<T> : IConsumer<T>
+{
+    public void Consume(T item) { /* ... */ }
+}
+
+// Контравариантность: IConsumer<Dog> можно присвоить IConsumer<Animal>
+IConsumer<Dog> consumer = new Consumer<Animal>();
+
+// Класс с несколькими ограничениями
+public class Repository<T> where T : class, IEntity, new()
+{
+    public T CreateNew()
+    {
+        return new T(); // new() гарантирует наличие конструктора
+    }
+}
+
+// Ограничение для значимых типов
+public class NumericProcessor<T> where T : struct, IComparable<T>
+{
+    // ...
+}
+```
 
 ### Делегаты и события
 
-- `delegate`, `Func<>`, `Action<>`, `Predicate<>`
-- События (`event`, `EventHandler`, `EventArgs`)
-- Анонимные методы и лямбда-выражения
-- Замыкания (closures)
+**Делегат (delegate)** - это тип данных, который содержит ссылку на метод с определённой при создании делегата сигнатурой и типом возвращаемого значения. Созданный делегат можно связать с любым видимым методом, обладающим той же сигнатурой, что указана в делегате при создании. Делегаты используются для передачи методов в качестве аргументов другим методам. (передача поведения)
 
-### Асинхронность и многопоточность
+**Лямбда-выражение (анонимный метод) (lambda expression)** - компактная встроенная функция, которая записывается с использованием оператора  `=>`. Любое лямбда-выражение может быть преобразовано в тип делегата. Т.е. делегат может содержать ссылку на лямбду.
+
+**Событие (event)** - это элемент класса, позволяющий объекту уведомлять другие компоненты программы о том, что что-либо произошло в ходе его работы. События реализованы через делегаты с ограничениями, налагаемые ключевым словом `event`
+
+**Замыкание (closure)** - это ситуация, связанная с возможностью анонимных методов захватывать локальные переменные в местах, где они объявляются. В результате создаётся объект со ссылкой на исходную локальную переменную, значение локальной переменной при этом не копируется.
+
+- Объявление и использование
+  - Делегаты
+
+    ```c#
+    // Объявление типа делегата — описывает, какие методы он может принимать
+    public delegate int PerformCalculation(int x, int y);
+
+    // Метод, совместимый с этим делегатом
+    public static int Add(int a, int b) => a + b;
+    public static int Multiply(int a, int b) => a * b;
+
+    // Использование
+    PerformCalculation calc = Add;          // связываем с методом
+    int result = calc(3, 4);               // 7
+
+    calc = Multiply;                        // можно переназначить
+    result = calc(3, 4);                   // 12
+    ```
+
+    **Важно**: делегат учитывает возвращаемое значение, в отличие от перегрузок.
+
+    Есть несколько встроенных типов делегатов:
+
+    `Action<A, B, C,...>` - не возвращает значение (`void`), принимает от 0 до 16 параметров.
+
+    `Func<A,B,C,...` - возвращает значение (последний указанный тип), принимает от 0 до 16 параметров + 1 возвращаемое значение
+
+    `Predicate<T>` - возвращает `bool`, принимает 1 тип.
+
+    ```c#
+    // Action — ничего не возвращает
+    Action<string> logger = message => Console.WriteLine($"[LOG] {message}");
+    logger("Application started");
+
+    // Func — возвращает значение
+    Func<int, int, int> add = (a, b) => a + b;
+    int sum = add(5, 3); // 8
+
+    // Predicate — возвращает bool
+    Predicate<int> isEven = x => x % 2 == 0;
+    bool even = isEven(4); // true
+    ```
+
+  - Лямбда-выражения
+
+    ```c#
+    // 1. Expression lambda — тело в виде одного выражения
+    Func<int, int> square = x => x * x;
+
+    // 2. Statement lambda — тело в виде блока с фигурными скобками
+    Func<int, int> process = x =>
+    {
+        var temp = x * 2;
+        return temp + 1;
+    };
+
+    // Без параметров
+    Action sayHello = () => Console.WriteLine("Hello!");
+
+    // Несколько параметров
+    Func<int, int, int> multiply = (a, b) => a * b;
+    ```
+
+  - Многоадресные делегаты. Делегаты можно объединять в цепочку вызовов. При вызове такого делегата, все методы в цепочке будут вызваны последовательно.
+
+    ```c#
+    Action<string> logger = Console.WriteLine;
+    logger += message => Console.WriteLine($"[LOG] {message}");
+    logger += message => Console.WriteLine($"[INFO] {message}");
+
+    logger("Hello"); // Выведет три строки
+
+    logger -= Console.WriteLine; // Удаляем один обработчик
+    logger("World"); // Выведет две строки
+    ```
+
+- События
+
+  События объявляются в классах ключевым словом `event`. Оно всегда имеет тип делегата. Встроенного (`EventHandler`, `EventHandler<TEventArgs>`) или собственного (плохая практика).
+
+  ```c#
+  public class Counter
+  {
+      // 1. Событие без данных — используем EventHandler
+      public event EventHandler ThresholdReached;
+
+      // 2. Событие с данными — используем EventHandler<TEventArgs>
+      public event EventHandler<ThresholdEventArgs> ThresholdReachedWithData;
+
+      // 3. Событие с пользовательским делегатом (редко, но можно)
+      public delegate void CustomEventHandler(object sender, ThresholdEventArgs e);
+      public event CustomEventHandler CustomThresholdReached;
+  }
+  ```
+
+  Соглашение об именовании событий: 
+  * Событие должно иметь глагольную форму.  `Clicked`, `Reached`, `Recieved`
+  * Для произошедших событий используется форма простого прошедшего времени, для происходящих в текущий момент или тех, что сейчас произойдут форма V+ing: `Reaching`, `Saving`, `Streaming`
+  * Тип делегата для событий должен возвращать `void`.
+
+  Создание подписчика
+
+  ```c#
+  // Через именованный статичный метод:
+  Counter counter = new Counter();
+
+  // Подписка на событие
+  counter.ThresholdReached += OnThresholdReached;
+
+  // Обработчик события
+  private static void OnThresholdReached(object? sender, EventArgs e)
+  {
+      Console.WriteLine("Порог достигнут!");
+  }
+  // Сигнатура обработчика должна совпадать с типом делегата события. Для EventHandler это: void MethodName(object sender, EventArgs e).
+
+  // Через лямбда-выражение
+  counter.ThresholdReached += (sender, e) => Console.WriteLine("Порог достигнут!");
+
+  // устаревший синтаксис, но до сих пор рабочий
+  counter.ThresholdReached += delegate(object sender, EventArgs e)
+  {
+      Console.WriteLine("Порог достигнут!");
+  };
+  ```
+
+  Отписка от события осуществляется оператором `-=`
+
+  ```c#
+  // Правильно: сохраняем ссылку на обработчик
+  EventHandler handler = OnThresholdReached;
+  counter.ThresholdReached += handler;
+  // ...
+  counter.ThresholdReached -= handler; // отписка работает
+
+  // Неправильно: лямбда не сохраняется
+  counter.ThresholdReached += (s, e) => Console.WriteLine("Hello");
+  counter.ThresholdReached -= (s, e) => Console.WriteLine("Hello"); // НЕ ОТПИШЕТ!
+
+  // Правильно:
+  EventHandler lambdaOnThresholdReached = (s,e) => Console.WriteLine("Hello");
+  counter.ThresholdReached += lambdaOnThresholdReached;
+  counter.InvokeShit(); // Hello
+  counter.ThresholdReached -= lambdaOnThresholdReached; 
+  counter.InvokeShit(); // Ничего не выведется, т.к. единственный подписчик отписался
+  ```
+
+  Вызов событий возможен только внутри класса, который его объявил - ключевое отличие от простого делегата: 
+
+  ```c#
+  public class Counter
+  {
+      private int _total;
+      private readonly int _threshold;
+
+      public Counter(int threshold) => _threshold = threshold;
+
+      public event EventHandler ThresholdReached;
+
+      // Защищённый виртуальный метод для вызова события — стандартный паттерн
+      protected virtual void OnThresholdReached(EventArgs e)
+      {
+          // ?.Invoke — безопасный вызов: если подписчиков нет, ничего не произойдёт
+          ThresholdReached?.Invoke(this, e);
+      }
+
+      public void Add(int value)
+      {
+          _total += value;
+          if (_total >= _threshold)
+          {
+              OnThresholdReached(EventArgs.Empty);
+          }
+      }
+  }
+  ```
+
+- Замыкания возникают, когда лямбда-выражение или анонимный метод захватывает переменную из внешней области видимости
+
+  Важно: Захватывается ссылка на переменную, а не её значение. Изменение переменной после создания лямбды отражается на её поведении.
+
+  Внутреннее устройство: при компиляции для захваченных переменных создаётся отдельный класс-контейнер. Этот класс содержит поля для всех захваченных переменных и хранит ссылку на них.
+
+  ```c#
+  int factor = 10;
+  Func<int, int> multiplier = x => x * factor;  // factor захвачен
+  Console.WriteLine(multiplier(5)); // 50
+
+  factor = 20;
+  Console.WriteLine(multiplier(5)); // 100 — захвачена ссылка, а не значение!
+
+  var actions = new List<Action>();
+   for (int i = 0; i < 3; i++)
+   {
+       actions.Add(() => Console.WriteLine(i)); // ОДНА переменная i для всех итераций!
+   }
+   foreach (var action in actions)
+   action(); // Выведет 3, 3, 3 (не 0, 1, 2)
+
+     // Исправление — копируем переменную внутрь цикла
+   for (int i = 0; i < 3; i++)
+   {
+       int copy = i; // новая переменная для каждой итерации
+       actions.Add(() => Console.WriteLine(copy));
+   }
+   // Выведет 0, 1, 2
+  ```
+
+- Комплексный пример: система уведомлений
+
+  ```c#
+  using System;
+
+  // 1. Объявление пользовательского делегата (для событий с данными)
+  public delegate void MessageEventHandler(object sender, MessageEventArgs e);
+
+  // 2. Класс с данными события
+  public class MessageEventArgs : EventArgs
+  {
+      public string Message { get; }
+      public DateTime Timestamp { get; }
+      
+      public MessageEventArgs(string message)
+      {
+          Message = message;
+          Timestamp = DateTime.Now;
+      }
+  }
+
+  // 3. Издатель событий
+  public class MessagePublisher
+  {
+      // Событие — подписчики могут подписываться и отписываться
+      public event MessageEventHandler MessageReceived;
+      
+      // Обобщённое событие с использованием EventHandler<T>
+      public event EventHandler<MessageEventArgs> MessageSent;
+      
+      public void SendMessage(string text)
+      {
+          var args = new MessageEventArgs(text);
+          
+          // Вызов события с пользовательским делегатом
+          MessageReceived?.Invoke(this, args);
+          
+          // Вызов события с EventHandler<T>
+          MessageSent?.Invoke(this, args);
+      }
+  }
+
+  // 4. Подписчики
+  public class ConsoleLogger
+  {
+      public void OnMessageReceived(object sender, MessageEventArgs e)
+      {
+          Console.WriteLine($"[{e.Timestamp:HH:mm:ss}] LOG: {e.Message}");
+      }
+  }
+
+  public class FileLogger
+  {
+      private readonly string _filePath;
+      
+      public FileLogger(string path)
+      {
+          _filePath = path;
+      }
+      
+      public void OnMessageSent(object sender, MessageEventArgs e)
+      {
+          // Имитация записи в файл
+          Console.WriteLine($"[FILE] Записано в {_filePath}: {e.Message}");
+      }
+  }
+
+  // 5. Использование
+  class Program
+  {
+      static void Main()
+      {
+          var publisher = new MessagePublisher();
+          var consoleLogger = new ConsoleLogger();
+          var fileLogger = new FileLogger("log.txt");
+          
+          // Подписка на события
+          publisher.MessageReceived += consoleLogger.OnMessageReceived;
+          publisher.MessageSent += fileLogger.OnMessageSent;
+          
+          // Лямбда-выражение в качестве обработчика (с захватом внешней переменной)
+          int messageCount = 0;
+          publisher.MessageSent += (sender, e) =>
+          {
+              messageCount++;
+              Console.WriteLine($"Всего сообщений: {messageCount} (лямбда-обработчик)");
+          };
+          
+          // Отправка сообщений
+          publisher.SendMessage("Hello, world!");
+          publisher.SendMessage("Second message");
+          
+          // Отписка
+          publisher.MessageReceived -= consoleLogger.OnMessageReceived;
+          publisher.SendMessage("Third message — без ConsoleLogger");
+      }
+  }
+  ```
+
+- Рекомендации и практики
+  - Используйте встроенные делегаты, вместо создания своих там, где это возможно. Исключение: использование специфичных `ref` и `out` аргументов
+  - Для событий использовать следует `EventHandler` и `EventHandler<TEventArgs>` - это стандарт .NET. Следуйте соглашению: обработчик имеет два параметра: `(object sender, TEventArgs e)` и возвращает `void`
+  - `MyEvent?.Invoke(this, EventArgs.Empty);` - всегда используйте проверку на `null`.
+  - Не забывайте отписываться от событий
+  - Использовать лямбда-выражения следует для короткой логики.
+  - Для сложной логики следует использовать именованные методы
+  - Если используются замыкания в циклах - следует создавать копию замыкаемой переменной, иначе все лямбда-выражения будут ссылаться на единый экземпляр переменной, если, конечно, не предполагается именно такое поведение.
+  - Не используйте пустые обработчики для избежаний null-проверок в событиях и делегатах. `MyEvent += (s, e) => { };` - так НЕ НАДО.
+  - Не подписывайтесь на события там, где не надо, отписывайтесь от событий, когда уже не надо. Иначе - утечки памяти.
+  - Не используйте лямбда-выражения с побочными эффектами в запросах к базам данных - код может стать непредсказуемым
+  - Не модифицируйте коллекции внутри делегатов во время итерации по коллекциям. Самое лучшее что может произойти - исключение. 
+  - Не вызывайте события вне класса-издателя, поскольку это нарушение инкапсуляции.
+  
+  Как понять что нужно использовать делегат, вместо обычных методов?
+  - Нужно передать логику? - Делегат
+  - Обратный вызов?(callback) - Делегат
+  - События с уведомлением подписчиков? - Делегат
+  - Последовательный вызов методов? - Делегат
+
+### Асинхронность и многопоточность 
 
 - `async`/`await`, `Task`, `Task<T>`
 - Контекст синхронизации, `ConfigureAwait(false)`
