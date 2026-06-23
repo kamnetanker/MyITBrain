@@ -3585,6 +3585,8 @@ public class NumericProcessor<T> where T : struct, IComparable<T>
 }
 ```
 
+---
+
 ### Делегаты и события
 
 **Делегат (delegate)** - это тип данных, который содержит ссылку на метод с определённой при создании делегата сигнатурой и типом возвращаемого значения. Созданный делегат можно связать с любым видимым методом, обладающим той же сигнатурой, что указана в делегате при создании. Делегаты используются для передачи методов в качестве аргументов другим методам. (передача поведения)
@@ -3922,21 +3924,73 @@ public class NumericProcessor<T> where T : struct, IComparable<T>
   - События с уведомлением подписчиков? - Делегат
   - Последовательный вызов методов? - Делегат
 
+---
+
 ### Асинхронность и многопоточность 
 
-- `async`/`await`, `Task`, `Task<T>`
-- Контекст синхронизации, `ConfigureAwait(false)`
-- `Parallel.ForEach`, `PLINQ`, `lock`, `SemaphoreSlim`
+- **1. Основы `async` / `await`**
+  
+  При написании приложений возникают тяжелые с вычислительной точки зрения задачи, ожидать выполнения которых, может не иметь смысла в текущий момент или может быть вредно, ввиду блокирования основного потока, который отвечает за отрисовку UI. Чтобы избежать блокировки основного потока, продолжать выполнение задач, не требующих длительного ожидания и сохранения отзывчивости программы, существует механизм асинхронного выполнения.
+
+  Асинхронные задачи можно поделить на:
+    - CPU-bound - длительный процесс вычислений - здесь программист создаёт свои асинхронные методы и пишет так называемые `Task`
+    - Работа с вводом-выводом (IO) - здесь программист пишет 
+
+- **2. Запуск и создание задач**
+  - `Task.Run` — для CPU-bound
+  - `Task.FromResult` / `Task.CompletedTask` — для синхронных заглушек
+  - `Task.FromCanceled` / `FromException` — экзотика
+
+- **3. Ожидание и комбинирование**
+  - `await` — основной способ
+  - `Task.WhenAll` — ждём всех (параллельный I/O)
+  - `Task.WhenAny` — ждём первого (таймауты, конкурентные запросы)
+  - **Запрещёнка:** `.Result` и `.Wait()` (дедлоки в UI/ASP.NET)
+
+- **4. Отмена операций**
+  - `CancellationTokenSource` и `CancellationToken`
+  - `ThrowIfCancellationRequested()` vs `IsCancellationRequested`
+  - `CancelAfter(TimeSpan)` — автоматический таймаут
+
+- **5. Обработка ошибок**
+  - `try-catch` внутри `async` работает как обычно
+  - `AggregateException` при `Task.WhenAll` (как обрабатывать)
+
+- **6. Контекст синхронизации (`SynchronizationContext`)**
+  - Что это и зачем (UI-поток vs Пул потоков)
+  - **`ConfigureAwait(false)`** — когда использовать (библиотеки, бэкенд), когда нет (UI)
+  - Правило: в библиотеках всегда `ConfigureAwait(false)`
+
+- **7. Потоки и синхронизация (база)**
+  - `lock` — монитор (нельзя использовать с `await`)
+  - `SemaphoreSlim` — асинхронный семафор (`WaitAsync`)
+  - `Interlocked` — атомарные операции для счётчиков
+
+- **8. Параллельная обработка данных**
+  - `Parallel.For` / `Parallel.ForEach` — только для CPU-bound
+  - `PLINQ` (`AsParallel()`) — декларативный параллелизм
+  - Важно: не использовать для I/O (там `Task.WhenAll`)
+
+- **9. Потокобезопасные коллекции**
+  - `ConcurrentDictionary<TKey, TValue>`
+  - `ConcurrentQueue<T>`, `ConcurrentStack<T>`, `ConcurrentBag<T>`
+  - Замена `Dictionary` + `lock` в многопоточке
+
+---
 
 ### Ввод-вывод и сериализация
 
 - Файлы: `File`, `FileStream`, `StreamReader`/`StreamWriter`
 - JSON-сериализация (`System.Text.Json`), XML
 
+---
+
 ### Рефлексия и атрибуты
 
 - `typeof`, `GetType()`, `Assembly`
 - Пользовательские атрибуты, стандартные (`[Obsolete]`, `[Serializable]`)
+
+---
 
 ## Управление решениями и проектами
 
@@ -3945,22 +3999,32 @@ public class NumericProcessor<T> where T : struct, IComparable<T>
 - Структура `.sln` / `.csproj`
 - Свойства проекта (Target framework, ImplicitUsings, Nullable)
 
+---
+
 ### Зависимости и библиотеки
 
 - Class Library, NuGet-пакеты
 
+---
+
 ### Git и GitHub workflow
 
 - commit, push, pull, PR, merge, rebase
+
+---
 
 ### NuGet
 
 - Поиск, установка, обновление, версионирование
 - `PackageReference`, `packages.config`
 
+---
+
 ## Архитектура приложения
 
 ### SOLID
+
+---
 
 ### Паттерны проектирования
 
@@ -3968,9 +4032,13 @@ public class NumericProcessor<T> where T : struct, IComparable<T>
 - Структурные: Adapter, Decorator, Facade
 - Поведенческие: Strategy, Observer, Command
 
+---
+
 ### Архитектурные паттерны
 
 - MVC, MVVM, Clean Architecture, Vertical Slices
+
+---
 
 ## Практика создания приложения
 
@@ -3982,6 +4050,8 @@ public class NumericProcessor<T> where T : struct, IComparable<T>
 - Query syntax
 - Отложенное выполнение, `IQueryable` vs `IEnumerable`
 
+---
+
 ### ASP.NET Core Web API
 
 - Контроллеры / Minimal API
@@ -3989,9 +4059,13 @@ public class NumericProcessor<T> where T : struct, IComparable<T>
 - Middleware, фильтры
 - Внедрение зависимостей (DI)
 
+---
+
 ### Blazor WASM
 
 - Компоненты, параметры, привязка данных
 - `HttpClient`, `IHttpClientFactory`
 - Аутентификация (JWT, OAuth)
 - Взаимодействие с API
+
+---
