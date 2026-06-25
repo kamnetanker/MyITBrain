@@ -4258,33 +4258,415 @@ public class NumericProcessor<T> where T : struct, IComparable<T>
 ---
 
 - **4. Отмена операций**
-  - `CancellationTokenSource` и `CancellationToken`
+
+  - `CancelationTokenSource` и `CancelationToken`
+  
+  ```c#
+  using System;
+  using System.Threading;
+  using System.Threading.Tasks;
+
+  public class Program
+  {
+      public static async Task Main()
+      {
+          // CancellationTokenSource управляет отменой и реализует IDisposable 
+          using var cts = new CancellationTokenSource();
+          
+          // Token — лёгкий объект, который передаётся в задачи 
+          Task task = DoWorkAsync(cts.Token);
+          
+          Console.WriteLine("Нажмите любую клавишу для отмены...");
+          Console.ReadKey();
+          
+          // Cancel() отправляет сигнал отмены всем копиям токена 
+          cts.Cancel();
+          
+          try
+          {
+              await task;
+              Console.WriteLine("Задача завершена без отмены.");
+          }
+          catch (OperationCanceledException)
+          {
+              Console.WriteLine("Задача была отменена.");
+          }
+      }
+      
+      static async Task DoWorkAsync(CancellationToken token)
+      {
+          for (int i = 0; i < 10; i++)
+          {
+              // ThrowIfCancellationRequested() эквивалентен:
+              // if (token.IsCancellationRequested) throw new OperationCanceledException(token)
+              // Это предпочтительный способ завершения задачи при отмене 
+              token.ThrowIfCancellationRequested();
+              
+              // Delay с токеном — отменяемая задержка
+              await Task.Delay(500, token);
+              Console.WriteLine($"Шаг {i+1}");
+          }
+      }
+  }
+  ```
+  `CancellationTokenSource` - объект, создающий токен, через который может передать сигнал отмены вызовом метода `Cancel()`. Он реализует `IDisposable`, поэтому его следует оборачивать в `using`
+  
+  `CancellationToken` - легковесный значимый тип, который передаётся в асинхронные методы как параметр. Единая копия токена может быть передана множеству слушателей и все они получат сигнал отмены, по вызову метода `Cancel()`
+
+  `ThrowIfCancellationRequested()` - предпочтительный способ обработки сигналов отмены. Выбрасывает исключение `OperationCancelException`.
+
+  `Task.Delay(..., token)` - поддерживает отмену, если токен отменён во время задержки, задача завершится с исключением.
+
+  Этот механизм требуется для остановки длительных операций по требованию. Например, остановить загрузку большого файла, если так захотел пользователь, отменить обработку большого массива данных, если так захотел пользователь или отменить опрос API endpoints по таймауту. 
+
+  Сигнал отмены не является обязательным к выполнению, программист обязан реализовать проверку "не пришел ли сигнал отмены" и корректно обработать его. Однако, если метод поддерживает сигнал отмены, следует реализовать его обработку, иначе не вписывать в сигнатуру сигнал отмены.
+
   - `ThrowIfCancellationRequested()` vs `IsCancellationRequested`
-  - `CancelAfter(TimeSpan)` — автоматический таймаут
+
+  ```c#
+  using System;
+  using System.Threading;
+  using System.Threading.Tasks;
+
+  public class Program
+  {
+      public static async Task Main()
+      {
+          using var cts = new CancellationTokenSource();
+          
+          // Автоматическая отмена через 3 секунды
+          cts.CancelAfter(TimeSpan.FromSeconds(3));
+          
+          try
+          {
+              await DoWorkAsync(cts.Token);
+              Console.WriteLine("Завершено без отмены");
+          }
+          catch (OperationCanceledException)
+          {
+              Console.WriteLine("Отменено по таймауту");
+          }
+      }
+      
+      static async Task DoWorkAsync(CancellationToken token)
+      {
+          for (int i = 0; i < 10; i++)
+          {
+              // Способ 1: выбросить исключение (рекомендуется)
+              token.ThrowIfCancellationRequested();
+              
+              // Способ 2: проверить флаг и выйти по-своему
+              // if (token.IsCancellationRequested)
+              // {
+              //     Console.WriteLine("Отмена обнаружена, выходим");
+              //     return;
+              // }
+
+              // Способ 3: объединение предпочтительного способа с выполнением необходимых перед завершением операций
+              // if (token.IsCancellationRequested)
+              // {
+              // Тут пишем что-то, что нужно подготовить перед выходом
+              // В конце пишем:
+              // token.ThrowIfCancellationRequested();
+              // }
+              
+              await Task.Delay(500, token);
+              Console.WriteLine($"Шаг {i+1}");
+          }
+      }
+  }
+  ```
+
+  `CancelAfter(TimeSpan)` - таймаут. Через указанный промежуток времени токенам будет отправлен сигнал отмены. Можно сказать, защита от зависаний и бесконечных циклов.
+
+  `ThrowIfCancellationRequeted()` - выбрасывает исключение  `OperationCanceledException`, которая должна быть отловлена вне задачи, это стандартный и предпочтительный способ отмены задачи. Если не выбросить исключение, то задача будет помечена, как выполненная, а не прерванная.
+
+  `IsCancellationRequested` - `bool` флаг в структуре `Token`, для проверки запроса на остановку.
+
+  Если требуется что-либо делать при отмене задач, то следует выбрасывать исключение `ThrowIfCancellationRequested()`, если отмена - штатное событие и вызывающему методу не требуется обрабатывать отменённые задачи, можно штатно проверить `IsCancellationRequested` и выйти через `return`. 
 
 - **5. Обработка ошибок**
-  - `try-catch` внутри `async` работает как обычно
+  
+  ```c#
+  using System;
+  using System.Threading.Tasks;
+
+  public class Program
+  {
+      public static async Task Main()
+      {
+        // Try-catch работает как обычно для одиночных асинхронных задач
+          try
+          {
+              await DoWorkAsync();
+              Console.WriteLine("Успешно");
+          }
+          catch (InvalidOperationException ex)
+          {
+              Console.WriteLine($"Поймано: {ex.Message}");
+          }
+      }
+
+      static async Task DoWorkAsync()
+      {
+          // Имитация асинхронной операции, которая выбрасывает исключение
+          await Task.Delay(100);
+          throw new InvalidOperationException("Что-то пошло не так");
+      }
+  }
+  ```
+
+  Как и в обычном методе, в асинхронном можно вызвать `throw new Exception(...);`, который пробросится через `await` в вызвавший операцию асинхронный метод. 
+
   - `AggregateException` при `Task.WhenAll` (как обрабатывать)
 
+  ```c#
+  using System;
+  using System.Threading.Tasks;
+
+  public class Program
+  {
+      public static async Task Main()
+      {
+        // Создаём несколько задач
+          Task task1 = Task.Run(() => { throw new InvalidOperationException("Ошибка 1"); });
+          Task task2 = Task.Run(() => { throw new ArgumentException("Ошибка 2"); });
+        // Оборачиваем в try
+          try
+          {// здесь получаем агрегированную ошибку. по сути коллекцию ошибок
+              await Task.WhenAll(task1, task2);
+          }// Обрабатываем коллекцию ошибок
+          catch (AggregateException ex) // Ловим AggregateException
+          {// Проходимся по коллекции ошибок и обрабатываем её
+              foreach (var innerEx in ex.InnerExceptions)
+              {
+                  Console.WriteLine($"Внутреннее: {innerEx.Message}");
+              }
+          }
+      }
+  }
+  ```
+
+  `Task.WhenAll` возвращает агрегированную задачу, которая завершится только, когда завершатся все задачи. Не важно, с ошибкой или без. Если несколько задач выбросили исключения, то все исключения оборачиваются в единое агрегированное исключение `AggregateException`. 
+
+  Зачем это нужно:  
+
+  Когда запускаешь несколько параллельных задач, важно знать обо всех ошибках, а не только о первой. Например, при пакетной обработке данных — нужно собрать все ошибки для логирования или отчёта.
+
 - **6. Контекст синхронизации (`SynchronizationContext`)**
-  - Что это и зачем (UI-поток vs Пул потоков)
+  - Что это и зачем (`UI`-поток vs `Пул потоков`)
+
+    При написании `UI` приложений, возникает работа со структурами данных, которые не являются потокобезопасными (кнопки, поля текста и т.п.), попытки изменить их вне потока, который их создал, приводят к `race-condition` (гонка за ресурсами), что приводит к трудноуловимым багам, крашам приложений и другим проблемам. 
+
+    Разработчики `UI` фреймворков (`WinForms`, `WPF`, `MAUI`) решили проблему просто: запретили изменять `UI` элементы в любом потоке, кроме основного и соответственно ввели основной поток, за который отвечает `SynchronizationContext`. 
+    
+    В приложениях `ASP.NET` и `Console` нет контекста синхронизации (`null`), поскольку не осуществляется работа с потоконебезопасными структурами, там выполнение после `await` продолжается в любом доступном потоке из пула потоков, а в `UI` приложениях устанавливается контекст, содержащий информацию о том, в какой поток должно вернутся выполнение после асинхронной операции, поскольку этот поток отвечает за `UI` элементы, он так же называется основным потоком. 
+
+    ```c#
+    using System;
+    using System.Threading;
+    using System.Threading.Tasks;
+
+    public class Program
+    {
+        public static async Task Main()
+        {
+            // Получаем текущий контекст синхронизации
+            var context = SynchronizationContext.Current;
+            Console.WriteLine($"Контекст: {context?.GetType().Name ?? "null"}");
+            
+            // В консольном приложении Current возвращает null
+            // В WinForms/WPF — это контекст UI-потока
+            
+            await DoWorkAsync();
+        }
+        
+        static async Task DoWorkAsync()
+        {
+            Console.WriteLine($"До await: Thread {Thread.CurrentThread.ManagedThreadId}");
+            
+            await Task.Delay(100);
+            
+            // После await в консоли — на любом потоке из пула
+            // В UI — снова на UI-потоке
+            Console.WriteLine($"После await: Thread {Thread.CurrentThread.ManagedThreadId}");
+        }
+    }
+    ```
+
+    Что говорит документация:
+
+    `SynchronizationContext` — это **базовый класс**, который предоставляет **контекст** без синхронизации со свободным доступом из разных потоков. Его цель — позволить внутренним асинхронным/синхронным операциям `CLR` корректно работать с разными моделями синхронизации.
+
+    Это абстракция, представляющая целевую среду, где должен выполняться код. Разные UI-фреймворки предоставляют свои реализации.
+
+    В UI-приложениях (`WinForms`, `WPF`, `.NET MAUI`) фреймворк устанавливает свой `SynchronizationContext`, привязанный к `UI-потоку`. Поэтому после await код по умолчанию возвращается в `UI-поток`.
+
+    В консольных приложениях `SynchronizationContext` не устанавливается, и `SynchronizationContext.Current` возвращает `null`. Поэтому после `await` продолжение выполняется на любом доступном потоке из пула потоков.
+
+    Зачем это нужно:
+    Понимать, что после `await` код может выполняться на другом потоке. Если ты работаешь с `UI`, нужно либо оставаться в `UI-потоке `(поведение по умолчанию), либо использовать `ConfigureAwait(false)`, чтобы разрешить выполнение в пуле потоков
+
   - **`ConfigureAwait(false)`** — когда использовать (библиотеки, бэкенд), когда нет (UI)
-  - Правило: в библиотеках всегда `ConfigureAwait(false)`
+    
+    ```c#
+    using System;
+    using System.Threading.Tasks;
+
+    public class Program
+    {
+        public static async Task Main()
+        {
+            // Без ConfigureAwait — возвращаемся в исходный контекст (если есть)
+            await DoWorkAsync();
+            
+            // С ConfigureAwait(false) — разрешаем выполнение в любом потоке пула
+            await DoWorkAsync().ConfigureAwait(false);
+        }
+        
+        static async Task DoWorkAsync()
+        {
+            await Task.Delay(100);
+            // Здесь код выполняется:
+            // - без ConfigureAwait: на UI-потоке (если в UI)
+            // - с ConfigureAwait(false): на любом свободном потоке
+        }
+    }
+    ```
+
+    `ConfigureAwait(false)` — это метод, который указывает, что не нужно пытаться вернуться в исходный контекст синхронизации после `await`. Вместо этого продолжение выполняется на любом доступном потоке из пула потоков.
+
+    По умолчанию `await` захватывает текущий контекст синхронизации (`SynchronizationContext.Current`). Если контекст есть (например, в `UI`), продолжение возвращается в него.
+
+    `ConfigureAwait(false)` отключает этот захват, что может повысить производительность и предотвратить дедлоки.
+
+    Когда использовать:
+
+    Всегда в библиотеках и коде, который не взаимодействует с `UI`. Это правило **Microsoft**: в общем коде библиотек используй `ConfigureAwait(false)`.
+
+    В `UI-приложениях`, если после `await` тебе не нужно обновлять интерфейс, можно использовать `ConfigureAwait(false)` для производительности.
+
+    Когда НЕ использовать:
+
+    В `UI-приложениях`, если после `await` ты обновляешь интерфейс — оставляй без `ConfigureAwait(false)`, чтобы гарантированно остаться на `UI-потоке`.
+
+    Правило: в библиотеках всегда `ConfigureAwait(false)`, в `UI-коде` — только там, где не нужен `UI-поток`.
+
+    Если происходит вызов асинхронного метода из другого асинхронного метода, который не связан с обновлением форм, то можно безопасно вызывать `ConfigureAwait(false)`, при возврате в исходный метод, связанный с UI-элементами, контекст синхронизируется с исходным потоком:
+
+    ```c#
+    public async void Button1Click(){
+      await DoSomething(); // Здесь нельзя ConfigureAwait(false), здесь должен произойти захват контекста
+    }
+    public async void DoSomething(){
+      await AnotherAsyncFunc().ConfigureAwait(false); // Здесь можно, при возврате в Button1Click() всё равно будет возвращён захваченный контекст основного потока
+    }
+    public async void AnotherAsyncFunc(){
+      // что-то тут делаем
+    }
+    ```
 
 - **7. Потоки и синхронизация (база)**
   - `lock` — монитор (нельзя использовать с `await`)
+
+    ```c#
+    using System;
+    using System.Threading;
+    using System.Threading.Tasks;
+
+    public class Account
+    {
+      // Используем объект для блокировки. Объект должен быть ссылочным и не должен использоваться ни для чего, кроме блокировки
+        private readonly object _balanceLock = new object();
+        private decimal _balance;
+
+        public void Debit(decimal amount)
+        {
+            lock (_balanceLock) // блокируем объект, сообщая всем: сейчас этот поток работает, нельзя трогать.
+            {
+                if (amount > _balance)
+                {
+                    throw new InvalidOperationException("Недостаточно средств");
+                }
+                _balance -= amount;
+            }
+        }
+
+        public void Credit(decimal amount)
+        {
+            lock (_balanceLock) // гарантирует, что только один поток за раз изменяет _balance
+            // Все остальные потоки, попытающиеся заблокировать - будут сами заблокированы, пока блокировка не снимется потоком, который заблокировал первым
+            {
+                _balance += amount;
+            }
+        }
+    }
+
+    public class Program
+    {
+        public static async Task Main()
+        {
+            var account = new Account();
+            var tasks = new Task[10];
+            
+            for (int i = 0; i < 10; i++)
+            {
+                tasks[i] = Task.Run(() => account.Credit(100));
+            }
+            
+            await Task.WhenAll(tasks);
+            Console.WriteLine("Готово");
+        }
+    }
+    ```
+
+    Необходимое определение: "Блокировка взаимного исключения" (mutual-exclusion lock) — это механизм, который гарантирует, что только один поток в любой момент времени может выполнять определённый участок кода (критическую секцию)
+
+    `lock` - оператор, который получает блокировку взаимного исключения на заданный объект, выполняет блок кода и освобождает блокировку. Для чего? защита от race-condition. 
+
+    Во время удержания, поток, который держит блокировку может освобождать и получать блокировку несколько раз. Любые другие потоки блокируются при попытке получить блокировку и ждут её освобождения
+
+    `lock` - гарантирует, что не более одного потока могут заблокировать объект и выполнять с ним команды из тела оператора.
+
+    Объект блокировки должен быть ссылочного типа
+
+    `lock` не позволяет использовать `await`, чтобы не возникло `DeadLock`
+
+    `lock` - по сути, синтаксический сахар над мониторами. Ранее использовалась конструкция, где создавался объект-монитор в разделяемой памяти, после чего было `Monitor.Enter`, по окончании работы `Monitor.Exit` и все, кто хотел зайти в блок, пока монитор занят блокировались на `Monitor.Enter`, пока тот, кто занят не вызовет `Monitor.Exit`. 
+
+    Рекомендации Microsoft:
+
+      `Блокируй` **приватный** объект, который не используется для других целей.
+
+      Не используй `this`, `typeof(Type)` или `строки` в качестве объекта блокировки — это может привести к `deadlock`.
+
+      Старайся удерживать блокировку как можно короче.
+
+      Начиная с .NET 9 и C# 13, рекомендуется использовать тип `System.Threading.Lock` для лучшей производительности.
+
+    Зачем это нужно:
+
+      Защита общих данных от одновременного изменения из разных потоков. Без `lock` несколько потоков могли бы одновременно изменить одно и то же поле, что привело бы к состоянию гонки (`race condition`) — непредсказуемому результату.
+
   - `SemaphoreSlim` — асинхронный семафор (`WaitAsync`)
   - `Interlocked` — атомарные операции для счётчиков
 
 - **8. Параллельная обработка данных**
-  - `Parallel.For` / `Parallel.ForEach` — только для CPU-bound
-  - `PLINQ` (`AsParallel()`) — декларативный параллелизм
+  - `Parallel.For` / `Parallel.ForEach` — только для CPU-bound 
   - Важно: не использовать для I/O (там `Task.WhenAll`)
 
 - **9. Потокобезопасные коллекции**
   - `ConcurrentDictionary<TKey, TValue>`
   - `ConcurrentQueue<T>`, `ConcurrentStack<T>`, `ConcurrentBag<T>`
   - Замена `Dictionary` + `lock` в многопоточке
+
+- **10 Дополнительные аспекты многопоточности**
+
+  - `Thread` vs `Task`
+  - Когда использовать `Thread`, а когда `Task`
+  - `Разделяемая память` и `состояние`
+  - Как `задачи` и `потоки` видят `память`
+  - Паттерны синхронизации (`Producer-Consumer`, `Reader-Writer`, `Cooperative Cancellation`)
 
 ---
 
@@ -4359,6 +4741,7 @@ public class NumericProcessor<T> where T : struct, IComparable<T>
 - Методы расширения: `Where`, `Select`, `OrderBy`, `GroupBy`, `Join`, `Aggregate`…
 - Query syntax
 - Отложенное выполнение, `IQueryable` vs `IEnumerable`
+- `PLINQ` (`AsParallel()`) — декларативный параллелизм
 
 ---
 
