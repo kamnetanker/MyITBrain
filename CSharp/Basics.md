@@ -5227,8 +5227,804 @@ public class NumericProcessor<T> where T : struct, IComparable<T>
 
 ### Ввод-вывод и сериализация
 
-- Файлы: `File`, `FileStream`, `StreamReader`/`StreamWriter`
-- JSON-сериализация (`System.Text.Json`), XML
+- Файловый ввод-вывод
+  
+    Файловые ввод-вывод был рассмотрен ранее по конспекту. [Базовый ввод-вывод](#базовая-работа-с-потоками-ввода-вывода)
+
+    В текущем разделе рассматриваются приёмы асинхронной работы с файловым вводом-выводом, которые необходимы для обеспечения отзывчивости пользовательского интерфейса во время длительных операций чтения-записи с файлами, а так же чтобы не занимать потоки из пула потоков, пока ASP.NET сервер обрабатывает ввод-вывод из файла или БД.
+
+  - Простейший способ для маленьких файлов (до ~4МБ):
+
+    ```c#
+    // Асинхронная запись содержимого text в файл по указанному пути. Файл перезапишется.
+    await File.WriteAllTextAsync("path/to/file", text);
+    // Асинхронное чтение всего содержимого файла по указанному пути
+    string content = await File.ReadAllTextAsync("path/to/file");
+    ```
+
+  - Реализация работы через потоки ввода-вывода. Использовать обёртки `StreamReader` или `StreamWriter` сразу с асинхронностью нельзя, но можно создать `FileStream` с поддержкой на уровне системы асинхронности:
+  
+    ```c#
+    using FileStream fs = new FileStream(
+        "file.txt",
+        FileMode.Open,
+        FileAccess.Read,
+        FileShare.Read,
+        bufferSize: 4096,
+        useAsync: true  // или options: FileOptions.Asynchronous
+    );
+    StringBuilder sb =new StringBuilder();
+    byte[] buffer = new byte[4096];
+    int numRead;
+    while((numRead = await fs.ReadAsync(buffer, 0, buffer.Length)) != 0){
+        string text = Encoding.Unicode.GetString(buffer, 0, numRead);
+        sb.Append(text);
+    }
+    return sb.ToString();
+    ```
+
+    Комплексный пример, где ставится множество задач по записи чего-либо в файл приведён из документации Microsoft:
+
+    ```c#
+    public async Task ProcessMultipleWritesAsync()
+    {
+        IList<FileStream> sourceStreams = new List<FileStream>();
+
+        try
+        {
+            string folder = Directory.CreateDirectory("tempfolder").Name;
+            IList<Task> writeTaskList = new List<Task>();
+
+            for (int index = 1; index <= 10; ++ index)
+            {
+                string fileName = $"file-{index:00}.txt";
+                string filePath = $"{folder}/{fileName}";
+
+                string text = $"In file {index}{Environment.NewLine}";
+                byte[] encodedText = Encoding.Unicode.GetBytes(text);
+
+                var sourceStream =
+                    new FileStream(
+                        filePath,
+                        FileMode.Create, FileAccess.Write, FileShare.None,
+                        bufferSize: 4096, useAsync: true);
+
+                Task writeTask = sourceStream.WriteAsync(encodedText, 0, encodedText.Length);
+                sourceStreams.Add(sourceStream);
+
+                writeTaskList.Add(writeTask);
+            }
+
+            await Task.WhenAll(writeTaskList);
+        }
+        finally
+        {
+            foreach (FileStream sourceStream in sourceStreams)
+            {
+                sourceStream.Close();
+            }
+        }
+    }
+    ```
+
+- Базовая сериализация
+
+    Сериализация - процесс преобразования состояния объекта (значения всех его полей) в форму, которую можно сохранить или передать по сети. Сериализованная форма не содержит сведений о методах объекта, только значения полей.
+
+    Десериализация - обратный процесс преобразования данных в объект с заполнением полей значениями из сериализованных данных.
+
+  - JSON
+
+      `System.Text.Json` - встроенная библиотека в платформу .Net (с .Net Core 3), предоставляющая высокопроизводительные методы сериализации и десериализации данных.
+
+      Базовый пример:
+
+      ```c#
+      using System.Text.Json;
+
+      var person = new Person { Name = "Alice", Age = 30 };
+
+      // Сериализация в строку JSON
+      string json = JsonSerializer.Serialize(person);
+      // {"Name":"Alice","Age":30}
+
+      // Десериализация из строки JSON
+      Person? restored = JsonSerializer.Deserialize<Person>(json);
+      ```
+
+      Сериализация в файл и из файла:
+
+      ```c#
+      // Запись JSON прямо в файл
+      using FileStream fs = File.Create("person.json");
+      await JsonSerializer.SerializeAsync(fs, person);
+
+      // Чтение JSON из файла
+      using FileStream fs = File.OpenRead("person.json");
+      Person? restored = await JsonSerializer.DeserializeAsync<Person>(fs);
+      ```
+
+    1. По умолчанию сериализация чувствительна к регистру
+    2. Использует атрибуты `System.Text.Json.Serialization` применяемые к полям для управления сериализации:
+       1. Публичные поля - сериализуются
+       2. Публичные поля помеченные `[JsonIgnore]` - не сериализуются
+       3. Поля помеченние `[JsonPropertyName("name")]` будет переименовано при сериализации
+       4. Не публичные поля не сериализуются по умолчанию
+       5. Не публичные поля, помеченные `[JsonInclude]` - сериализуются
+    3. Есть поддержка `IAsyncEnumerable<T>`, что поддерживает сериализовать потоки данных в JSON-массивы  
+
+        ```c#
+        using System.IO;
+        using System.Text.Json;
+        using System.Threading.Tasks;
+        using System.Collections.Generic;
+
+        class Program
+        {
+            static async Task Main()
+            {
+                // 1. Create a writable stream (e.g., memory stream or file stream)
+                using var outputStream = new MemoryStream();
+
+                // 2. Get the asynchronous enumerable data source
+                IAsyncEnumerable<Product> dataStream = GetProductsAsync();
+
+                // 3. Serialize directly to the stream asynchronously
+                await JsonSerializer.SerializeAsync(outputStream, dataStream);
+
+                // Verify output by reading the stream
+                outputStream.Position = 0;
+                using var reader = new StreamReader(outputStream);
+                string jsonResult = await reader.ReadToEndAsync();
+                
+                System.Console.WriteLine(jsonResult);
+            }
+
+            // A mock method simulating a database or API async stream
+            static async IAsyncEnumerable<Product> GetProductsAsync()
+            {
+                for (int i = 1; i <= 3; i++)
+                {
+                    await Task.Delay(100); // Simulate network lag
+                    yield return new Product { Id = i, Name = $"Widget {i}" };
+                }
+            }
+        }
+
+        class Product
+        {
+            public int Id { get; set; }
+            public string Name { get; set; } = string.Empty;
+        }
+        ```
+
+        P.S. пометить поле атрибутом значит написать этот атрибут перед полем, на которое он должен распространить своё действие.
+
+    4. Рекомендуется помечать сериализуемые классы атрибутом `[JsonSerializable]`
+
+    Сравнение с `Newtonsoft.Json`: `System.Text.Json` — это рекомендуемая библиотека для новых проектов. Она встроена в рантайм, быстрее и безопаснее. `Newtonsoft.Json` остаётся для поддержки **legacy-кода** и сценариев, где нужны функции, которых пока нет в `System.Text.Json`.
+
+  - XML
+
+      `System.Xml.Serialization` - пространство имён, позволяющее сериализовать объекты в `XML` формат. Это лютейшее легаси и в новых проектах не приветствуется, но мы же не только пишем что-то новое, но и саппортим древний хлам, который бизнес не хочет переписывать, но готов много платить за поддержку и внедрение новых функций.
+
+      Базовый пример использования:
+
+      ```c#
+      using System.Xml.Serialization;
+
+      var person = new Person { Name = "Alice", Age = 30 };
+
+      // Создаём сериализатор для типа Person
+      XmlSerializer serializer = new XmlSerializer(typeof(Person));
+
+      // Сериализация в файл
+      using (FileStream fs = File.Create("person.xml"))
+      {
+          serializer.Serialize(fs, person);
+      }
+
+      // Десериализация из файла
+      using (FileStream fs = File.OpenRead("person.xml"))
+      {
+          Person? restored = (Person?)serializer.Deserialize(fs);
+      }
+      ```
+
+      Здесь требуется создать объект, который будет сериализовать экземпляры определённого класса.
+
+      Атрибуты:
+      1. `[XmlRoot("name")]` - задаёт имя корневого элемента. Этим атрибутом помечается сам класс, а не поля.
+      2. `[XmlElement("name")]` - Задаёт имя конкретного поля
+      3. `[XmlAttribute("name")]` - Говорит использовать значение поля, как атрибут (т.е. для класса `Person` поле `name` помеченное атрибутом, будет сериализовано как: `<Person name="...">`)
+      4. `[XmlIgnore]` - не сериализовать поле
+      5. `[XmlArray("name")]` - если в объекте находится массив, который необходимо сериализовать, то надо задать имя этому массиву. Этим атрибутом это делается.
+      6. `[XmlArrayItem("name")]` - имя для элементов сериализуемого массива
+
+      Пример с атрибутами:
+
+      ```c#
+        using System.Xml.Serialization;
+        using System.IO;
+
+        // Корневой элемент будет <PurchaseOrder>
+        [XmlRoot("PurchaseOrder")]
+        public class PurchaseOrder
+        {
+            // Address сериализуется как вложенный элемент
+            public Address ShipTo { get; set; } = new Address();
+            
+            // OrderDate сериализуется как элемент <OrderDate>
+            public string OrderDate { get; set; } = "";
+            
+            // Массив сериализуется как <Items> с вложенными <OrderedItem>
+            [XmlArray("Items")]
+            [XmlArrayItem("OrderedItem")]
+            public OrderedItem[]? OrderedItems { get; set; }
+        }
+
+        public class Address
+        {
+            // Name сериализуется как атрибут: <Address Name="...">
+            [XmlAttribute]
+            public string Name { get; set; } = "";
+            
+            // City сериализуется как элемент <City>
+            [XmlElement]
+            public string City { get; set; } = "";
+        }
+
+        public class OrderedItem
+        {
+            public string ItemName { get; set; } = "";
+            public decimal UnitPrice { get; set; }
+            [XmlIgnore]  // ← Не попадёт в XML
+            public string InternalNote { get; set; } = "";
+        }
+
+        // Использование
+        var order = new PurchaseOrder
+        {
+            ShipTo = new Address { Name = "Alice", City = "Springfield" },
+            OrderDate = "2026-06-28",
+            OrderedItems = new[] 
+            { 
+                new OrderedItem { ItemName = "Laptop", UnitPrice = 999.99m } 
+            }
+        };
+
+        var serializer = new XmlSerializer(typeof(PurchaseOrder));
+        using var writer = new StringWriter();
+        serializer.Serialize(writer, order);
+        Console.WriteLine(writer.ToString());
+      ```
+
+      Результат:
+
+      ```xml
+        <?xml version="1.0" encoding="utf-16"?>
+        <PurchaseOrder>
+        <ShipTo>
+            <Address Name="Alice">
+            <City>Springfield</City>
+            </Address>
+        </ShipTo>
+        <OrderDate>2026-06-28</OrderDate>
+        <Items>
+            <OrderedItem>
+            <ItemName>Laptop</ItemName>
+            <UnitPrice>999.99</UnitPrice>
+            </OrderedItem>
+        </Items>
+        </PurchaseOrder>
+      ```
+
+- Продвинутая сериализация
+
+    Использование текстового представления в формате JSON, XML не всегда удобно и не всегда подходит под решаемую задачу, потому человечество придумало ещё ряд вариантов того, как можно закодировать информацию и передать её между информационными системами.
+
+  - Base64 и Base64Url
+
+    Одним из первых, что придумали люди стал `Base64` - перекодирование любого набора байт в ограниченный набор символов, который не ломал бы ссылки, не позволял встраивать `SQL` инъекции, хорошо сжимался, но увы, был чуть длинее обычного текста, ввиду того, что каждые 6 бит исходного байтового массива(в который первоначально перекодировывается строка или любой другой набор данных) кодируются одним символом длиной 8 бит. Таких символов всего 64. 52 - верхний и нижний регистр латинского алфавита, 10 цифр и два символа мат. операций: `+`, `/`, а для отступа вообще использовали `=`, а зачем отступ нужен так и не поняли. А далее появились ссылки и символ деления начал их ломать, как и символ плюса, потому их заменили для ссылок и назвали это Base64Url и получилось, что два дополнительных символа это `-` и `_` и всё стало работать, отступ выкинули, потому что он вообще бесполезный, данные летают, люди радуются. Таким образом передают картинки, видео, простой текст, аудио. Что угодно, что можно отобразить в виде массива байт, а так можно отобразить любые цифровые данные.
+
+    В C# для кодирования в `Base64` и `Base64Url` используется статический класс `Convert` из пространства имён `System`;
+
+    ```c#
+    using System;
+
+    // Бинарные данные (например, изображение или массив байт)
+    byte[] binaryData = { 0x48, 0x65, 0x6C, 0x6C, 0x6F }; // "Hello"
+
+    // Кодирование в Base64
+    string base64String = Convert.ToBase64String(binaryData);
+    Console.WriteLine(base64String); // "SGVsbG8="
+
+    // Декодирование из Base64
+    byte[] restored = Convert.FromBase64String(base64String);
+    ```
+
+    `Base64Url` encoding example from `System.Buffers.Text` namespace:
+
+    ```c#
+    using System.Buffers.Text;
+
+    byte[] data = { 0x48, 0x65, 0x6C, 0x6C, 0x6F };
+
+    // Base64Url-кодирование
+    string base64Url = Base64Url.EncodeToString(data);
+    // или
+    Span<char> destination = stackalloc char[Base64Url.GetEncodedLength(data.Length)];
+    Base64Url.EncodeToChars(data, destination, out _, out _);
+    string result = new string(destination);
+    ```
+
+  - YAML
+
+    YAML (YAML Ain't Markup Language) — это формат сериализации данных, ориентированный на читаемость человеком.
+
+    Ключевые особенности:
+
+    - Использует отступы (пробелы) для обозначения структуры, как в Python.
+    - Не требует кавычек для строк в большинстве случаев.
+    - Поддерживает сложные структуры: словари, списки, вложенные объекты.
+    - Широко используется в конфигурационных файлах (Docker Compose, Kubernetes, GitHub Actions, Ansible).
+
+    ```yaml
+    # YAML — читается как обычный текст
+    name: Alice
+    age: 30
+    addresses:
+    home:
+        street: Main St
+        city: Springfield
+    work:
+        street: Oak Ave
+        city: Shelbyville
+    ```
+
+    В .NET нет встроенной поддержки YAML. Основная библиотека — YamlDotNet (NuGet-пакет).
+
+    Установка:
+
+    ```bash
+    dotnet add package YamlDotNet
+    ```
+
+    Сериализация:
+
+    ```c#
+    using YamlDotNet.Serialization;
+    using YamlDotNet.Serialization.NamingConventions;
+
+    var person = new Person
+    {
+        Name = "Alice",
+        Age = 30,
+        Addresses = new Dictionary<string, Address>
+        {
+            { "home", new Address { Street = "Main St", City = "Springfield" } }
+        }
+    };
+
+    var serializer = new SerializerBuilder()
+        .WithNamingConvention(CamelCaseNamingConvention.Instance) // имена свойств в camelCase
+        .Build();
+
+    string yaml = serializer.Serialize(person);
+    Console.WriteLine(yaml);
+    /* Вывод:
+    name: Alice
+    age: 30
+    addresses:
+    home:
+        street: Main St
+        city: Springfield
+    */
+    ```
+
+    Десериализация:
+
+    ```c#
+    using YamlDotNet.Serialization;
+    using YamlDotNet.Serialization.NamingConventions;
+
+    string yaml = @"
+    name: Alice
+    age: 30
+    addresses:
+    home:
+        street: Main St
+        city: Springfield
+    ";
+
+    var deserializer = new DeserializerBuilder()
+        .WithNamingConvention(CamelCaseNamingConvention.Instance)
+        .Build();
+
+    Person? person = deserializer.Deserialize<Person>(yaml);
+    Console.WriteLine($"{person.Name} — {person.Age}");
+    ```
+
+    Где:
+    - `SerializerBuilder` — настройка сериализации (именование, пропуск `null`, игнорирование свойств).
+    - `DeserializerBuilder` — настройка десериализации.
+    - `WithNamingConvention` — выбор стиля имён: `CamelCaseNamingConvention`, `PascalCaseNamingConvention`, `UnderscoredNamingConvention` и др.
+
+    ---
+
+    **АЛЬТЕРНАТИВА** (Это утки, как говорилось в анекдоте)
+
+    `SharpYaml` — высокопроизводительный YAML-парсер с API, похожим на `System.Text.Json`:
+
+    ```c#
+    using SharpYaml.Serialization;
+
+    var serializer = new YamlSerializer();
+    string yaml = serializer.Serialize(person);
+    Person? person = serializer.Deserialize<Person>(yaml);
+    ```
+
+    Любите своих девопсов, предпочитайте YAML для конфигурации <3
+
+  - JSON DOM
+
+    Иногда вот не хочется всю JSON структуру объектов воспроизводить и десериализовать полностью данные в объекты, хочется просто взять поле и сделать, что надо, исходя из JSON схемы и реализуемой бизнес-логики, тогда на помощь приходит Document Object Model и возможность сделать её из JSON документа.
+
+    `JsonDocument` — быстрый доступ только для чтения
+
+    `JsonDocument` парсит `JSON` в неизменяемую `DOM`. Доступ к элементам осуществляется через тип `JsonElement`:
+
+    ```c#
+    using System.Text.Json;
+
+    string jsonString = @"
+    {
+        ""Students"": [
+            { ""Name"": ""Alice"", ""Grade"": 95 },
+            { ""Name"": ""Bob"", ""Grade"": 87 },
+            { ""Name"": ""Charlie"" }
+        ]
+    }";
+
+    double sum = 0;
+    int count = 0;
+
+    using (JsonDocument document = JsonDocument.Parse(jsonString))  // IDisposable[reference:10]
+    {
+        JsonElement root = document.RootElement;
+        JsonElement studentsElement = root.GetProperty("Students");
+
+        foreach (JsonElement student in studentsElement.EnumerateArray())
+        {
+            if (student.TryGetProperty("Grade", out JsonElement gradeElement))
+            {
+                sum += gradeElement.GetDouble();
+                count++;
+            }
+        }
+    }
+
+    Console.WriteLine($"Средняя оценка: {sum / count}");  // Средняя оценка: 91
+    ```
+
+    Ключевые моменты:  
+    - JsonDocument.Parse() — создаёт DOM из строки.
+    - RootElement — корневой элемент документа.
+    - GetProperty("имя") — получает свойство по имени (выбрасывает исключение, если свойства нет).
+    - TryGetProperty("имя", out var) — безопасная версия, возвращает false, если свойства нет.
+    - EnumerateArray() — итератор по элементам массива.
+    - JsonDocument реализует IDisposable — обязательно используй using
+
+    ---
+ 
+    `JsonNode` и производные классы (`JsonObject`, `JsonArray`, `JsonValue`) позволяют не только читать, но и изменять `JSON`
+
+    ```c#
+    using System.Text.Json;
+    using System.Text.Json.Nodes;
+
+    string jsonString = @"
+    {
+        ""Date"": ""2019-08-01T00:00:00"",
+        ""Temperature"": 25,
+        ""Summary"": ""Hot"",
+        ""DatesAvailable"": [ ""2019-08-01"", ""2019-08-02"" ],
+        ""TemperatureRanges"": {
+            ""Cold"": { ""High"": 20, ""Low"": -10 },
+            ""Hot"": { ""High"": 60, ""Low"": 20 }
+        }
+    }";
+
+    // 1. Создание DOM из JSON-строки[reference:19]
+    JsonNode forecastNode = JsonNode.Parse(jsonString)!;
+
+    // 2. Получение значения по ключу (индексатор)[reference:20]
+    JsonNode temperatureNode = forecastNode!["Temperature"]!;
+    int temperature = (int)temperatureNode!;  // Приведение к типу[reference:21]
+    Console.WriteLine($"Temperature: {temperature}");  // Temperature: 25
+
+    // 3. Безопасное получение через GetValue<T>[reference:22]
+    int temp = forecastNode!["Temperature"]!.GetValue<int>();
+    Console.WriteLine($"Temperature (GetValue): {temp}");
+
+    // 4. Получение вложенного объекта[reference:23]
+    JsonNode temperatureRanges = forecastNode!["TemperatureRanges"]!;
+    Console.WriteLine(temperatureRanges.ToJsonString());
+    // Вывод: { "Cold": { "High": 20, "Low": -10 }, "Hot": { "High": 60, "Low": 20 } }
+
+    // 5. Получение массива[reference:24]
+    JsonNode datesAvailable = forecastNode!["DatesAvailable"]!;
+    Console.WriteLine($"Type: {datesAvailable.GetType()}");  // JsonArray
+
+    // 6. Изменение DOM (в отличие от JsonDocument)[reference:25]
+    forecastNode!["Summary"] = "Warm!";
+    Console.WriteLine(forecastNode.ToJsonString());
+    ```
+
+    Ключевые моменты:  
+    - `JsonNode.Parse()` — создаёт DOM из строки.
+    - Индексатор `["ключ"]` — обращение к свойству (возвращает `JsonNode?`).
+    - Приведение к типу `(int)node` или `GetValue<T>()` — извлечение типизированного значения.
+    - `ToJsonString()` — сериализация `DOM` обратно в `JSON`.
+    - В отличие от `JsonDocument`, `JsonNode` не требует `using` и позволяет изменять данные.
+
+    ---
+
+    Десериализация в `Dictionary<string, object>` или `Dictionary<string, JsonElement>`
+
+    Если структура JSON полностью неизвестна, можно десериализовать его в словарь.
+
+    ```c#
+    using System.Text.Json;
+
+    string json = @"{ ""name"": ""Alice"", ""age"": 30, ""active"": true }";
+    var dict = JsonSerializer.Deserialize<Dictionary<string, object>>(json);
+
+    foreach (var kvp in dict)
+    {
+        Console.WriteLine($"{kvp.Key}: {kvp.Value} ({kvp.Value.GetType()})");
+    }
+    // name: Alice (System.String)
+    // age: 30 (System.Text.Json.JsonElement)  ← обрати внимание!
+    // active: True (System.Text.Json.JsonElement)
+    ```
+
+    Важно: числа и булевы значения десериализуются как `JsonElement`, а не как `int` или `bool`. Чтобы получить их в нужном типе, нужно работать через `JsonElement`
+
+    `Dictionary<string, JsonElement>` — даёт полный контроль над типами.
+
+    ```c#
+    using System.Text.Json;
+
+    string json = @"{ ""name"": ""Alice"", ""age"": 30, ""active"": true }";
+    var dict = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(json);
+
+    string name = dict["name"].GetString();           // "Alice"
+    int age = dict["age"].GetInt32();                 // 30
+    bool active = dict["active"].GetBoolean();        // true
+    ```
+
+    ---
+
+    Костыли)
+
+    `[JsonExtensionData]` — захват «лишних» полей
+
+    Если ты создаёшь частичный класс для API, но хочешь сохранить все поля, которые не описаны в твоём классе, используй атрибут `[JsonExtensionData]`:
+
+    ```c#
+    using System.Text.Json;
+    using System.Text.Json.Serialization;
+
+    public class WeatherForecast
+    {
+        public DateTimeOffset Date { get; set; }
+        public int TemperatureCelsius { get; set; }
+        public string? Summary { get; set; }
+
+        // Все поля, которых нет в классе, попадут сюда[reference:31]
+        [JsonExtensionData]
+        public Dictionary<string, JsonElement>? ExtensionData { get; set; }
+    }
+
+    // JSON содержит поля, которых нет в классе
+    string json = @"
+    {
+        ""Date"": ""2019-08-01T00:00:00-07:00"",
+        ""TemperatureCelsius"": 25,
+        ""Summary"": ""Hot"",
+        ""DatesAvailable"": [ ""2019-08-01"", ""2019-08-02"" ],
+        ""SummaryWords"": [ ""Cool"", ""Windy"", ""Humid"" ]
+    }";
+
+    var forecast = JsonSerializer.Deserialize<WeatherForecast>(json);
+
+    // Основные поля заполнены
+    Console.WriteLine(forecast.Summary);  // Hot
+
+    // Лишние поля сохранились в ExtensionData[reference:32]
+    foreach (var kvp in forecast.ExtensionData)
+    {
+        Console.WriteLine($"{kvp.Key}: {kvp.Value}");
+    }
+    // DatesAvailable: ["2019-08-01","2019-08-02"]
+    // SummaryWords: ["Cool","Windy","Humid"]
+    ```
+
+    Очень удобно при итеративной разработке клиента под некоторые API сервиса, когда нет необходимости разом реализовывать всё для всех полей. Появилась логика - объявил поле, не появилась - пусть пылиться в отдельной переменной не мешая совместимости.
+
+    ---
+
+    YAML DOM!!!!!!!!!
+
+    Работа с YAML без полных классов
+    Для YAML подходы аналогичны JSON. Библиотека YamlDotNet позволяет десериализовать YAML в словарь или частичную структуру.
+
+    Способ 1: Десериализация в `Dictionary<string, object>`
+
+    ```c#
+    using YamlDotNet.Serialization;
+
+    string yaml = @"
+    name: Alice
+    age: 30
+    address:
+    city: Springfield
+    street: Main St
+    ";
+
+    var deserializer = new DeserializerBuilder().Build();
+    var dict = deserializer.Deserialize<Dictionary<string, object>>(yaml);
+
+    Console.WriteLine(dict["name"]);        // Alice
+    // address — это вложенный словарь
+    var address = dict["address"] as Dictionary<object, object>;
+    Console.WriteLine(address?["city"]);    // Springfield
+    ```
+
+  - Шота на высокопроизводительном
+
+    `MessagePack` — это бинарный формат, похожий на `JSON` по **структуре**, но в **бинарном виде**.
+
+    Ключевые особенности:
+
+    - Поддерживает те же типы, что и JSON (строки, числа, массивы, словари).
+    - Данные значительно компактнее JSON (иногда в 2–3 раза).
+    - Очень высокая производительность.
+    - Поддерживает LZ4-сжатие для ещё большего уменьшения размера.
+  
+    Библиотека для C#: `MessagePack` (`NuGet`-пакет).
+
+    ```c#
+    using MessagePack;
+
+    var person = new Person { Name = "Alice", Age = 30 };
+
+    // Сериализация в бинарный массив
+    byte[] binaryData = MessagePackSerializer.Serialize(person);
+
+    // Десериализация из бинарного массива
+    Person? restored = MessagePackSerializer.Deserialize<Person>(binaryData);
+    ```
+
+    Когда использовать MessagePack:  
+    - Кэширование (Redis поддерживает MessagePack).
+    - Межсервисное взаимодействие внутри кластера (высокая производительность).
+    - Игры и мобильные приложения (экономия трафика).
+
+    ---
+
+    `Protocol Buffers` (`protobuf`) — формат от `Google`, требующий предварительного описания схемы данных в `.proto`-файлах.
+
+    Ключевые особенности:  
+    - Строгая типизация — схема описывается заранее.
+    - Обратная совместимость — можно добавлять новые поля без поломки старых клиентов.
+    - Используется в `gRPC` — основном фреймворке для высокопроизводительных RPC-вызовов.
+
+    Библиотека для C#: `Google.Protobuf` + `Grpc.Tools` для генерации кода из `.proto`.
+
+    ```c#
+    // Код генерируется автоматически из .proto-файла
+    var person = new Person { Name = "Alice", Age = 30 };
+
+    // Сериализация
+    byte[] binaryData = person.ToByteArray();
+
+    // Десериализация
+    Person restored = Person.Parser.ParseFrom(binaryData);
+    ```
+
+    Когда использовать Protocol Buffers:  
+    - gRPC-сервисы — это нативный формат.
+    - Микросервисная архитектура с множеством языков (protobuf поддерживается почти везде).
+    - Системы, где важна строгая типизация и версионирование.
+
+- Дополнение
+  - Передача сериализованных данных по сети
+
+    Просто так сериализовать и десериализовать данные в рамках своего компьютера занятие, конечно, увлекательное, но контрпродуктивное после пары итераций, поэтому имеет смысл передавать данные куда-нибудь, где они нужны. Поэтому данные сериализуем, преобразовываем в массив байт и отправляем по сети:
+
+    ```c#
+    using System.Net.Sockets;
+    using System.Text;
+    using System.Text.Json;
+
+    // === КЛИЕНТ (отправка) ===
+    var person = new Person { Name = "Alice", Age = 30 };
+
+    // 1. Сериализация в JSON-строку
+    string json = JsonSerializer.Serialize(person);
+
+    // 2. Преобразование в байты для отправки
+    byte[] data = Encoding.UTF8.GetBytes(json);
+
+    // 3. Отправка по TCP
+    using TcpClient client = new TcpClient("127.0.0.1", 8080);
+    using NetworkStream stream = client.GetStream();
+    await stream.WriteAsync(data, 0, data.Length);
+
+    // === СЕРВЕР (приём) ===
+    // 1. Чтение байтов из сети
+    byte[] buffer = new byte[1024];
+    int bytesRead = await stream.ReadAsync(buffer, 0, buffer.Length);
+
+    // 2. Преобразование байтов в строку
+    string receivedJson = Encoding.UTF8.GetString(buffer, 0, bytesRead);
+
+    // 3. Десериализация в объект
+    Person? receivedPerson = JsonSerializer.Deserialize<Person>(receivedJson);
+    ```
+
+    Так же важно знать, что ASP.NET Core позволяет СРАЗУ публиковать в Endpoint данные объекта в JSON сериализованном виде, как в примере ниже (даже заголовок Content-Type: application/json автоматически поставится):
+
+    ```c#
+    using System.Net.Http.Json;
+
+    // Отправка POST с JSON-объектом
+    var person = new Person { Name = "Alice", Age = 30 };
+    HttpResponseMessage response = await httpClient.PostAsJsonAsync("/api/people", person);
+
+    // Получение и десериализация JSON-ответа
+    Person? result = await response.Content.ReadFromJsonAsync<Person>();
+    ```
+
+  - Потоковое сжатие
+
+    Ни одна современная сетевая инфраструктура не обходится без потокового сжатия, поскольку передавать файл размером десятки гигабайт или кучу повторяющихся данных по сетям общего доступа без сжатия - заведомо проигрышная ситуация, никакого канала данных не хватит, если завтра кто-то загадает джину, чтобы никакого сжатия не существовало.
+
+    `GZipStream` находится в пространстве имён `System.IO.Compression`. Он работает как обёртка над любым потоком и сжимает/разжимает данные на лету
+
+    ```c#
+    // == СЖАТИЕ ==
+    using System.IO.Compression;
+    using System.Text.Json;
+
+    var person = new Person { Name = "Alice", Age = 30 };
+
+    // 1. Открываем файл для записи
+    using FileStream fileStream = File.Create("person.json.gz");
+
+    // 2. Оборачиваем в GZipStream для сжатия
+    using GZipStream compressionStream = new GZipStream(fileStream, CompressionMode.Compress);
+
+    // 3. Сериализуем JSON прямо в сжатый поток
+    await JsonSerializer.SerializeAsync(compressionStream, person);
+
+    // == РАСПАКОВКА == (ДВАПАКОВКА)
+    using System.IO.Compression;
+    using System.Text.Json;
+
+    // 1. Открываем сжатый файл
+    using FileStream fileStream = File.OpenRead("person.json.gz");
+
+    // 2. Оборачиваем в GZipStream для распаковки
+    using GZipStream decompressionStream = new GZipStream(fileStream, CompressionMode.Decompress);
+
+    // 3. Десериализуем JSON из распакованного потока
+    Person? person = await JsonSerializer.DeserializeAsync<Person>(decompressionStream);
+    ```
+
+    т.к. это потоки, потоки могут выступать и для передачи данных, не забываем об этом.
 
 ---
 
