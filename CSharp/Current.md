@@ -86,19 +86,7 @@
 - [040 - Сериализация](./Middle/040-Сериализация.md)
 - [050 - Рефлексия и атрибуты](./Middle/050-РефлексияАтрибуты.md)
 - [060 - Принципы программирования](./Middle/060-ПринципыПрограммирования.md)
-
-**Планируемые темы (будут добавлены позже):**
-
-- Паттерны проектирования
-- Архитектурные паттерны
-- LINQ
-- **Базы данных и SQL (основы)**
-- **Entity Framework Core**
-- ASP.NET Core Web API
-- **Тестирование (xUnit, Moq)**
-- **Логирование (Serilog)**
-- **Кэширование (MemoryCache, Redis)**
-- **Фоновые задачи (BackgroundService, Hangfire)**
+- [070 - Паттерны проектирования](./Middle/070-ПаттерныПроектирования.md)
 
 ---
 
@@ -106,21 +94,6 @@
 
 - [010 - Сборщик мусора](./Senior/010-СборщикМусора.md)
 
-**Планируемые темы (будут добавлены позже):**  
-
-- Проекты (структура `.sln` / `.csproj`)
-- Git и GitHub workflow
-- NuGet
-- Модель памяти .NET (Stack, Managed/Unmanaged Heap, барьеры)
-- Продвинутая отладка и профилирование
-- Безопасность в .NET (криптография, защита от атак)
-- **Микросервисы (gRPC, Message Queues)**
-- **Контейнеризация и оркестрация (Docker, Kubernetes — основы)**
-- **Наблюдаемость (Prometheus, OpenTelemetry)**
-- **Безопасность (JWT, OAuth2)**
-- **Профилирование и оптимизация производительности**
-- Blazor WASM
-- SourceGenerators
 
 ---
 
@@ -128,15 +101,30 @@
 
 Эти темы уже есть в `Current.md` и ждут своего часа. Они будут добавлены в соответствующие разделы после того, как я создам для них файлы.
 
-- Паттерны проектирования (`Middle/070-ПаттерныПроектирования.md`)
-- Архитектурные паттерны (`Middle/080-АрхитектурныеПаттерны.md`)
-- Проекты (структура `.sln` / `.csproj`) (`Senior/020-УправлениеПроектами.md`)
-- Git и GitHub workflow (`Senior/030-GitWorkflow.md`)
-- NuGet (`Senior/040-NuGet.md`) 
-- LINQ (`Middle/090-LINQ.md`)
-- ASP.NET Core Web API (`Middle/100-ASPNETCoreWebAPI.md`)
-- Blazor WASM (`Senior/050-BlazorWASM.md`)
-- Методология и процессы (XP и др.) (`Senior/060-Methodology.md`)
+- [Архитектурные паттерны](./Middle/080-АрхитектурныеПаттерны.md)
+- [Базы данных и SQL (основы)](./Middle/090-БазыДанных.md)
+- [LINQ](./Middle/100-LINQ.md)
+- [Entity Framework Core](./Middle/110-EFCore.md)
+- [ASP.NET Core Web API](./Middle/120-ASPNETAPI.md)
+- [Тестирование (xUnit, Moq)](./Middle/130-Тестирование.md)
+- [Логирование (Serilog)](./Middle/140-Логирование.md)
+- [Кэширование (MemoryCache, Redis)](./Middle/150-Кэширование.md)
+- [Фоновые задачи (BackgroundService, Hangfire)](./Middle/160-Сервисы.md)
+- [Проекты (структура `.sln` / `.csproj`)](./Senior/020-УправлениеПроектами.md)
+- [Git и GitHub workflow](./Senior/030-GitWorkflow.md)
+- [NuGet](./Senior/040-NuGet.md)  
+- [Модель памяти .NET (Stack, Managed/Unmanaged Heap, барьеры)](./Senior/050-МодельПамяти.md)
+- [Продвинутая отладка и профилирование](./Senior/060-ОтладкаПрофилирование.md)
+- [Безопасность в .NET (криптография, защита от атак)](./Senior/070-Безопасность.md)
+- [Микросервисы (gRPC, Message Queues)](./Senior/080-Микросервисы.md)
+- [Контейнеризация и оркестрация (Docker, Kubernetes — основы)](./Senior/090-Контейнеризация.md)
+- [Наблюдаемость (Prometheus, OpenTelemetry)](./Senior/100-Мониторинг.md)
+- [Авторизация (JWT, OAuth2)](./Senior/110-Авторизация.md)
+- [Профилирование и оптимизация производительности](./Senior/120-ПродвинутоеПрофилированиеИОптимизация.md)
+- [Blazor WASM](./Senior/130-Blazor.md)
+- [SourceGenerators](./Senior/140-SourceGenerators.md)
+
+---
 
 ## Планируемые практические темы
 
