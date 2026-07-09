@@ -127,6 +127,7 @@
 - [070 - Паттерны проектирования](./Middle/070-ПаттерныПроектирования.md)
 - [080 - Архитектурные паттерны](./Middle/080-АрхитектурныеПаттерны.md)
 - [090 - Базы данных и SQL (основы)](./Middle/090-БазыДанных.md)
+- [100 - LINQ](./Middle/100-LINQ.md)
 - 
 ---
 
@@ -141,7 +142,6 @@
 
 Эти темы уже есть в `Current.md` и ждут своего часа. Они будут добавлены в соответствующие разделы после того, как я создам для них файлы.
 
-- [LINQ](./Middle/100-LINQ.md)
 - [Entity Framework Core](./Middle/110-EFCore.md)
 - [ASP.NET Core Web API](./Middle/120-ASPNETAPI.md)
 - [Тестирование (xUnit, Moq)](./Middle/130-Тестирование.md)
@@ -247,148 +247,158 @@
 
 # Текущая работа
 
-## LINQ
+## Погружение в EF Core 
 
-`LINQ` `(Language Integrated Query)` - встроенный в C# язык запросов для обработки данных, аналогичный есть в JAVA (Stream API), но более куцый и созданный, чтобы не уступать шарпу в его фичах.
+## Формирование подключения к базе данных.
 
-`LINQ` выполняет типовые операции по обработке данных напрямую в пространстве памяти приложения, без необходимости использовать дополнительные языки для обработки XML, например.
-
-## Запросы
-
-`LINQ` операция состоит из 3 основных частей:
-
-1. Получение данных. Это может быть массив, коллекция, DBSet из EF Core или XML документ.
-2. Создание запросы
-   1. Откуда
-   2. Что делаем (можно много раз)
-   3. Возврат результата
-3. Выполнение запроса и извлечение результата.
-
-Важно: данные, за некоторыми исключениями, не обрабатываются в момент формирования запроса, они обрабатываются только в момент извлечения результата.
-
-Пример простого запроса с использованием `LINQ`:
+`1 способ` - `OnConfiguring`(для простых проектов):
 
 ```c#
-// 1. Источник данных
-int[] scores = [97, 92, 81, 60];
-
-// 2. Создание запроса (запрос пока НЕ выполнен)
-IEnumerable<int> scoreQuery = from score in scores
-                              where score > 80
-                              select score;
-
-// 3. Выполнение запроса (только здесь данные извлекаются)
-foreach (var i in scoreQuery)
+protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
 {
-    Console.Write(i + " ");  // Вывод: 97 92 81
+    optionsBuilder.UseSqlServer("Server=localhost;Database=MyDb;User Id=sa;Password=MyPass;");
 }
 ```
 
-## Два синтаксиса описания запросов
-
-1. Query Syntax - упрощённый декларативный вариант задания запроса:
+`2 способ` - построить контекст базы данных через AppBuilder
 
 ```c#
-int[] numbers = [97, 92, 81, 60];
-IEnumerable<int> numQuery1 = from num in numbers
-                             where num % 2 == 0
-                             orderby num
-                             select num;
+builder.Services.AddDbContext<AppDbContext>(
+    options =>
+    options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection"))
+    );
 ```
 
-2. Method Syntax - исходный вариант синтаксиса, практически полностью слизанный java семью годами позже.
+в appsettings.json необходимо добавить строку подключения:
 
-```c#
-IEnumerable<int> numQuery2 = numbers
-                             .Where(num => num % 2 == 0)
-                             .OrderBy(n => n);
-```
-
-Некоторые операции (например, Count, Max, Average) не имеют эквивалента в Query Syntax и должны быть вызваны как методы
-
-Методы типа `Where`, `Select`, `OrderBy` — это методы-расширения (extension methods) для интерфейса `IEnumerable<T>`. Они определены в классе `System.Linq.Enumerable`. Чтобы они были доступны, нужно подключить пространство имён `using System.Linq;`
-
-## Время выполнения
-
-Важнейшая концепция, которую необходимо понять про запросы `LINQ` - момент времени, когда запрос выполняется.
-
-```c#
-var numbers = new List<int> { 1, 2, 3, 4, 5 };
-
-// Запрос создан, но НЕ выполнен
-var query = numbers.Where(n => n > 2);
-
-// Добавляем элемент в источник ПОСЛЕ создания запроса
-numbers.Add(6);
-
-// Запрос выполняется ТОЛЬКО здесь — и увидит 6!
-foreach (var n in query)  // Результат: 3, 4, 5, 6
+```json
 {
-    Console.WriteLine(n);
+  "ConnectionStrings": {
+    "DefaultConnection": "Server=localhost;Database=MyDb;User Id=sa;Password=MyPass;"
+  }
 }
 ```
 
-Все методы, которые возвращают одиночное значение (singleton) — Count(), Max(), Min(), Average(), Sum(), First(), ToList(), ToArray(), исполняются в момент вызова, поскольку это получение результата. First(), Single(), Any() тоже немедленные.
+## Формирование модели данных
+
+Для формирования модели данных EF Core использует подход из 3-х компонент:
+
+1. Соглашение (convention) - набор правил для поиска типичных паттернов. Как пример из уже изученного модель данных на основании публичных свойств объекта
+2. Атрибуты (data annotations) - набор атрибутов, используемый для явного обозначения того, как формируется модель и какие ограничения в SQL на неё накладываются.
+3. Fluent API  - формирование модели через вызовы `ModelBuilder` и `OnModelCreating`
+
+EF Core автоматически способен определить исходя из соглешений:
+
+- Первичный ключ - свойство с именем Id или <тип>Id: user.Id или user.UserId - оба поля могут быть определены как первичный ключ
+- Тип столбца - на основе типов свойств C#
+- Отношения - на основе навигационных свойств.
+
+Атрибуты используются напрямую в классе сущности:
 
 ```c#
-var numbers = new List<int> { 1, 2, 3, 4, 5 };
+using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations.Schema;
 
-// Выполняется СРАЗУ — результат зафиксирован
-var count = numbers.Where(n => n > 2).Count();  // count = 3
+public class User
+{
+    [Key]
+    public int Id { get; set; }
 
-numbers.Add(6);  // Добавляем элемент ПОСЛЕ выполнения
+    [Required]
+    [MaxLength(100)]
+    public string Name { get; set; }
 
-// count всё ещё 3 — он уже посчитан и не изменится
-// ToList() и ToArray() так же возвращают результат СРАЗУ
-// Принудительное выполнение — результат кэшируется в списке
-var cachedResult = numbers.Where(n => n > 2).ToList();
+    [Required]
+    [EmailAddress]
+    public string Email { get; set; }
+
+    [Column("RegistrationDate")]
+    public DateTime CreatedAt { get; set; }
+}
 ```
 
-## Базовые операции
-
-`Where` - фильтрация
-
-Возврат только того, что удовлетворяет условию.
+Fluent API (рекомендуется для сложных конфигураций) формируется в OnModelCreating и имеет наивысший приоритет в вопросе определения модели данных:
 
 ```c#
-int[] numbers = [3, 6, 2, 1 ,7, 8, 10];
-
-// Query Syntax
-IEnumerable<int> evenNumbers = from n in numbers
-                               where n%2 == 0
-                               select n;
-
-// Method Syntax
-IEnumerable<int> evenNumbers2 = numbers.Where(n => n%2==0); // Здесь Inline делегат.
-// По сути, запросы в Query Syntax это синтаксический сахар для Method Syntax. При сборке проекта, вся красота Query Syntax превращается в Method Syntax и набор делегатов.
+protected override void OnModelCreating(ModelBuilder modelBuilder)
+{
+    modelBuilder.Entity<User>(entity =>
+    {
+        entity.HasKey(u => u.Id);
+        entity.Property(u => u.Name).IsRequired().HasMaxLength(100);
+        entity.Property(u => u.Email).IsRequired();
+        entity.Property(u => u.CreatedAt).HasColumnName("RegistrationDate");
+        entity.Property(u => u.IsActive).HasDefaultValue(true);
+    });
+}
 ```
 
-`OrderBy()` и `OrderByDescending()` - сортировка по возрастанию или убыванию.
+Для уменьшения размера OnModelCreating можно вынести конфигурацию в отдельные классы, реализующие IEntityTypeConfiguration<TEntity>
 
 ```c#
-// Query Syntax
-var sortedQuery = from n in numbers
-                  orderby n
-                  select n;
+public class UserConfiguration : IEntityTypeConfiguration<User>
+{
+    public void Configure(EntityTypeBuilder<User> builder)
+    {
+        builder.Property(u => u.Name).IsRequired().HasMaxLength(100);
+    }
+}
 
-// Method Syntax
-var sorted = numbers.OrderBy(n => n);        // по возрастанию
-var sortedDesc = numbers.OrderByDescending(n => n); // по убыванию
+// В OnModelCreating:
+modelBuilder.ApplyConfigurationsFromAssembly(typeof(UserConfiguration).Assembly);
 ```
 
-Принимаются базовые типы для которых реализовано сравнение, либо `IComparable`
+## Миграции
 
-`Select()` - позволяет модифицировать данные.
+Миграции - способ обновления схемы базы данных вслед за изменением требований со стороны приложения, использующего эту базу данных.
 
-```c#
-var result = numbers
-    .Where(n => n > 5)           // сначала фильтруем
-    .OrderBy(n => n)             // потом сортируем
-    .Select(n => n * 2);         // потом преобразуем
-// Результат: 12, 16, 20, 24 (отфильтрованные, отсортированные, умноженные на 2)
+Шаг 1. Установить инструменты для миграций:
+
+```cmd
+dotnet tool install --global dotnet-ef
 ```
 
-Так же, как можно заметить по примерам, методы группируются и возвращают `IEnumerable<T>`. Цепочка, в целом, может быть сколь угодно большая, но надо понимать, что результат будет вычисляться в момент извлечения данных, что может стать статором для пользователя при обработке большого запроса.
+Шаг 2. Добавить в проект зависимость
 
-Порядок указания методов обработки напрямую указывает, в каком порядке операции будут выполнятся, поэтому по возможности следует сокращать объём данных перед, например, сортировкой, поскольку фильтрация имеет сложноть `N`, а сортировка `N*Log(N)`
+```cmd
+dotnet add package Microsoft.EntityFrameworkCore.Design
+```
+
+Шаг 3. Создать миграцию
+
+```cmd
+dotnet ef migrations add InitialCreate
+```
+
+Эта команда создаёт папку Migrations с файлами, описывающими изменения (методы Up() и Down()).
+
+По сути, миграция - отдельная программа, которую создаёт разработчик для приведения схемы базы данных к форме, используемой в приложении, в случае, если она изменилась.
+
+Шаг 4. Применить миграцию
+
+Шаг не порядковый, но принципиальный. Миграции применяются к схеме отдельно. 
+
+```cmd
+dotnet ef database update
+```
+
+Для продакшена рекомендуется генерировать SQL-скрипты — их можно проверить, настроить и передать DBA
+
+```cmd
+# Скрипт от пустой БД до последней миграции
+dotnet ef migrations script
+
+# Скрипт от конкретной миграции до последней
+dotnet ef migrations script AddNewTables
+
+# Идемпотентный скрипт (проверяет, какие миграции уже применены)
+dotnet ef migrations script --idempotent
+```
+
+Что происходит при применении:
+
+- EF Core сравнивает модель с последней миграцией
+- Генерирует SQL-скрипт для обновления схемы
+- Выполняет его в базе данных
+- Сохраняет состояние миграции в таблице __EFMigrationsHistor
 
