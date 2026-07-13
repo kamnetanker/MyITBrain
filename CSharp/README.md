@@ -128,7 +128,9 @@
 - [080 - Архитектурные паттерны](./Middle/080-АрхитектурныеПаттерны.md)
 - [090 - Базы данных и SQL (основы)](./Middle/090-БазыДанных.md)
 - [100 - LINQ](./Middle/100-LINQ.md)
-- 
+- [110 - Entity Framework Core](./Middle/110-EFCore.md)
+
+
 ---
 
 ## Senior (экспертиза и глубина)
@@ -142,7 +144,6 @@
 
 Эти темы уже есть в `Current.md` и ждут своего часа. Они будут добавлены в соответствующие разделы после того, как я создам для них файлы.
 
-- [Entity Framework Core](./Middle/110-EFCore.md)
 - [ASP.NET Core Web API](./Middle/120-ASPNETAPI.md)
 - [Тестирование (xUnit, Moq)](./Middle/130-Тестирование.md)
 - [Логирование (Serilog)](./Middle/140-Логирование.md)
