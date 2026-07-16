@@ -1053,3 +1053,336 @@ public class UsersController : ControllerBase
 - async/await — все операции с БД должны быть асинхронными (ToListAsync(), SaveChangesAsync()).
 - Обработка DbUpdateException — при сохранении могут возникнуть ошибки (нарушение уникальности, внешних ключей). Их нужно обрабатывать.
 - Время жизни DbContext — регистрируется как Scoped (один на запрос), что соответствует времени жизни HTTP-запроса.
+
+## IHost и фоновые процессы
+
+Положим, что стоит задача сделать сервис, который работает не по команде, а постоянно, но при этом приложение должно предоставлять API для взаимодействия с внешним миром (например, выводить туда метрики для Prometheus, управлять конфигурацией сервиса, передавать ему какие-то новые данные и т.п.), тогда нам необходимо в параллель с основным API добавить BackgroundService и управлять этим будет встроенный `IHost`.
+
+`IHost` - механизм управления жизненным циклом компонент программы, внедрением зависимостей, конфигурацией (читает `appsettings.json`) и логированием(через `ILogger`).
+
+`ASP.NET Core` уже имеет этот механизм в настроенном и подготовленном для взаимодействия виде, т.е. создавая `WebApplication` мы сразу получаем механизм `IHost`.
+
+**Как это работает?**
+
+В самом верху иерархии находится `IHostedService`, который определяет методы взаимодействия с сервисами, которые регистрируются в приложении. Можно написать класс, который реализует этот интерфейс, но в таком случае придётся самостоятельно реализовать его методы, что может сильно замедлить разработку и привести к ошибкам.
+
+На такой случай разработчики заготовили для других разработчиков классы, которые реализуют этот интрефейс, например `BackgroundService`, у него есть сигнатура метода `ExecuteAsync(CancellationToken)` который необходимо переопределить в своём классе. Вся остальная инфраструктурная работа, не связанная с решением непосредственной задачи уходит на плечи разработчиков механизма `IHost`. 
+
+```c#
+public interface IHostedService{
+    // Тут куча методов, которые нас не интересуют
+    public async Task ExecuteAsync(CancellationToken token); // Метод, который интересует уже нас
+}
+public abstract class BackgroundService : IHostedService{ // Он реализует интерфейс
+   
+    // Тут что-то ещё реализованное заранее разрабами .Net
+    // ....
+    // А вот тут сигнатура метода, который необходимо переопределить
+     public virtual async Task ExecuteAsync(CancellationToken token); 
+}
+public sealed class MyBackgroundService : BackgroundService {
+    public override async Task ExecuteAsync(CancellationToken token){
+        // Тут уже пишем наш сервис. Приведу пример, как рекомендует это структурировать Microsoft в своей документации
+        try
+        {
+            while(!stoppingToken.IsCancellationRequested){
+                // чота делаем
+                await Task.Delay(TimeSpan.FromMinutes(1), stoppingToken); // Вот здесь может возникнуть исключение
+            }
+        }
+        catch (OperationCanceledException) // А здесь мы отловим исключение из ожидания
+        {
+            // Здесь они в документации говорят, что возвращать не-нуль нет необходимости, поскольку данное исключение "ожидаемое", т.е. мы ожидаем, что сервис однажды закроется.
+        }
+        catch(Exception ex){
+             logger.LogError(ex, "{Message}", ex.Message);
+
+            // Terminates this process and returns an exit code to the operating system.
+            // This is required to avoid the 'BackgroundServiceExceptionBehavior', which
+            // performs one of two scenarios:
+            // 1. When set to "Ignore": will do nothing at all, errors cause zombie services.
+            // 2. When set to "StopHost": will cleanly stop the host, and log errors.
+            //
+            // In order for the Windows Service Management system to leverage configured
+            // recovery options, we need to terminate the process with a non-zero exit code.
+            // Коротко переводя: мы должны вернуть не нулевое значение, чтобы система поняла,
+            // что это не штатное поведение.
+            // Собственно говоря, если следовать правилам отлова ошибок из конспекта /Junior/060-Исключения.md
+            // То в данное место попадёт только необрабатываемая ошибка, а тут уж некуда деваться, приложение упало. 
+            Environment.Exit(1);
+        }
+    }
+}
+```
+
+**Собственно, как зарегистрировать фоновый сервис в `WebApplication`?**
+
+```c#
+// Регистрация фонового сервиса
+builder.Services.AddHostedService<MyBackgroundService>(); // Всё. 
+// В момент app.Run(); для этого сервиса будет вызван ExecuteAsync и он начнёт фунциклировать.
+```
+
+## IOptions и управление конфигурацией
+
+**А как управлять этим фоновым сервисом?**
+
+Для этого существует семейство интерфейсов `IOptions`
+
+`IOptions<T>` - простая конфигурация, не обновляется после старта приложения.
+
+`IOptionsSnapshot<T>` - конфигурация, которая обновляется с каждым HTTP запросом, в рамках одного запроса не изменяется. Это полезно для контроллеров. Если какой-то контроллер начал работу с текущей версией конфигурации, но она изменилась в процессе обработки - ничего страшного не произойдёт, контроллер закончит обработку со старой версией, а следующую начнёт с изменённой. Но для сервиса, работающего постоянно данный подход не применим. 
+
+`IOptionsMonitor<T>` - обновляется при каждом изменении файла конфигурации и создаёт событие, что конфигурация изменилась, требуется лишь подписаться на это событие и обработать его.
+
+Ниже в полном примере будет показано как пользоваться всеми этими конфигурациями без лишней воды вокруг. 
+
+```csharp
+// 1. Модель конфигурации (общая для всех примеров)
+public class MySettings
+{
+    public string Name { get; set; } = "Default";
+    public int MaxItems { get; set; } = 10;
+}
+// 2. IOptions<T> — фиксированная конфигурация на всё время работы приложения
+// Регистрация. Конфигурация берётся из appsetings.json автоматически, отдельно нигде это указывать не надо.
+builder.Services.Configure<MySettings>(
+    builder.Configuration.GetSection("MySettings")
+);
+
+// Внедрение в контроллере (или любом другом сервисе)
+public class MyController : ControllerBase
+{
+    private readonly MySettings _settings;
+
+    public MyController(IOptions<MySettings> options)// Сюда попадает ТОЛЬКО секция MySettings, другие секции конфигурации сюда НЕ попадут, опять же DI делает это за нас.
+    {
+        _settings = options.Value; // Значение фиксируется при создании контроллера
+    }
+}
+// В фоновом сервисе (не обновляется)
+public class MyBackgroundService : BackgroundService
+{
+    private readonly MySettings _settings;
+
+    public MyBackgroundService(IOptions<MySettings> options)
+    {
+        _settings = options.Value;
+    }
+}
+
+// 3. IOptionsSnapshot<T> — обновляется на каждый HTTP-запрос (для контроллеров)
+// Регистрация — та же, что и для IOptions
+builder.Services.Configure<MySettings>(
+    builder.Configuration.GetSection("MySettings")
+);
+
+// Внедрение в контроллер
+public class MyController : ControllerBase
+{
+    private readonly IOptionsSnapshot<MySettings> _snapshot;
+
+    public MyController(IOptionsSnapshot<MySettings> snapshot)
+    {
+        _snapshot = snapshot;
+    }
+
+    [HttpGet]
+    public IActionResult Get()
+    {
+        var settings = _snapshot.Value; // Актуальная конфигурация на момент запроса
+        return Ok(settings);
+    }
+}
+// По сути DI проверяет при каждом запросе: изменилась ли конфигурация (по метаданным файла)? Если нет, то он отправляет то, что уже есть, не тратя системные ресурсы на перечитывание и создание новых экземпляров, а если изменилась, то перечитывает конфигурацию и обновляет в памяти её.
+
+// Важно: IOptionsSnapshot<T> НЕ РАБОТАЕТ в фоновых сервисах, потому что они не привязаны к HTTP-запросам. Если попытаться использовать его в BackgroundService — значение будет зафиксировано при создании.
+
+// 4. IOptionsMonitor<T> — обновляется при изменении файла (для фоновых сервисов и подписки)
+// Регистрация — та же, что и для IOptions
+builder.Services.Configure<MySettings>(
+    builder.Configuration.GetSection("MySettings")
+);
+
+// Использование в фоновом сервисе
+public class MyBackgroundService : BackgroundService
+{
+    private readonly IOptionsMonitor<MySettings> _monitor;
+    private readonly ILogger<MyBackgroundService> _logger;
+
+    public MyBackgroundService(IOptionsMonitor<MySettings> monitor, ILogger<MyBackgroundService> logger)
+    {
+        _monitor = monitor;
+        _logger = logger;
+    }
+
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    {
+        // Подписка на изменения
+        using var listener = _monitor.OnChange(settings =>
+        { // Напоминалка: делегат захватывает локальные переменные. /Middle/020-ДелегатыИСобытия.md
+            _logger.LogInformation("Конфигурация изменилась: Name={Name}, MaxItems={MaxItems}", 
+                settings.Name, settings.MaxItems);
+        });// Делегат мы используем для отслеживания, обновлять значения через него не нужно, это просто уведомление, что значения изменились.
+
+        while (!stoppingToken.IsCancellationRequested)
+        {
+            var settings = _monitor.CurrentValue; // Всегда актуальное значение
+            _logger.LogInformation("Текущая конфигурация: Name={Name}, MaxItems={MaxItems}", 
+                settings.Name, settings.MaxItems);
+
+            await Task.Delay(5000, stoppingToken);
+        }
+    }
+}
+
+// Использование в контроллере (тоже работает)
+public class MyController : ControllerBase
+{
+    private readonly IOptionsMonitor<MySettings> _monitor;
+
+    public MyController(IOptionsMonitor<MySettings> monitor)
+    {
+        _monitor = monitor;
+    }
+
+    [HttpGet]
+    public IActionResult Get()
+    {
+        return Ok(_monitor.CurrentValue);
+    }
+}
+```
+
+Во всех примерах appsettings.json выглядел так:
+
+```json
+{
+  "MySettings": {
+    "Name": "DefaultName",
+    "MaxItems": 10
+  }
+}
+```
+
+## PeriodicTimer - выполнение периодических задач
+
+`PeriodicTimer` - рекомендуемый современный способ организации периодических действий, созданный для асинхронного контекста.
+
+Пример без воды:
+
+```c#
+// 1. Простой пример внутри BackgroundService
+protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+{
+    using var timer = new PeriodicTimer(TimeSpan.FromSeconds(10));
+
+    while (await timer.WaitForNextTickAsync(stoppingToken))
+    {
+        // Твоя работа, которая выполняется каждые 10 секунд
+        Console.WriteLine($"Tick at {DateTime.Now}");
+    }
+}
+
+// 2. Пример с изменяемым периодом
+protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+{
+    var periodMs = 5000;
+    using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(periodMs));
+
+    while (await timer.WaitForNextTickAsync(stoppingToken))
+    {
+        // Работа
+        Console.WriteLine("Tick");
+        
+        // Если нужно изменить период — меняем свойство Period
+        timer.Period = TimeSpan.FromSeconds(3);
+    }
+}
+
+// 3. Пример с перехватом OperationCanceledException (для Task.Delay внутри цикла)
+protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+{
+    using var timer = new PeriodicTimer(TimeSpan.FromMinutes(1));
+
+    try
+    {
+        while (await timer.WaitForNextTickAsync(stoppingToken))
+        {
+            await Task.Delay(1000, stoppingToken); // может выбросить исключение
+        }
+    }
+    catch (OperationCanceledException)
+    {
+        // Ожидаемое завершение
+    }
+}
+```
+
+## Комплексный пример
+
+Задача: требуется отслеживать изменения в папке и управлять конфигурацией через WebAPI 
+
+В чём смысл? Через `IHost` механизм регистрируется фоновый процесс, который просто смотрит содержимое папки периодически и управляется через основной API, который так же регистрируется.
+
+Пошаговая реализация:
+
+**Шаг 1 заводим проект**
+
+```bash
+dotnet new webapi -n FolderMonitor
+cd FolderMonitor
+dotnet add package Microsoft.Extensions.Hosting
+dotnet add package Microsoft.Extensions.Options
+```
+
+**Шаг 2 Смотрим внимательно структуру проекта**
+
+```bash
+FolderMonitor/
+├── Program.cs                           # Точка входа: создание и запуск хоста
+├── appsettings.json                     # Основная конфигурация (MonitorConfig + ConnectionStrings)
+├── appsettings.Development.json         # Переопределение для разработки
+├── FolderMonitor.csproj                 # Файл проекта
+├── Models/
+│   └── MonitorConfig.cs                 # Класс с настройками: FolderPath, PeriodSeconds
+├── Services/
+│   └── FileSystemMonitorService.cs      # Фоновый сервис, наследующий BackgroundService
+├── Controllers/
+│   └── MonitorController.cs             # API для управления настройками
+└── Utils/
+    └── ConfigurationHelper.cs           # Методы для сохранения настроек в appsettings.json
+```
+
+**Шаг 3 определяем модель конфигурации**
+
+`Models/MonitorConfig.cs`
+
+```c#
+namespace FolderMonitor.Models;
+
+public class MonitorConfig
+{
+    public string FolderPath { get; set; } = "./monitored";  // Папка для мониторинга
+    public int PeriodSeconds { get; set; } = 10;             // Интервал сканирования (сек)
+}
+```
+
+**Шаг 4 переводим модель в конфигурацию**
+
+`appsettings.json`
+
+```json
+{
+  "MonitorConfig": {
+    "FolderPath": "./monitored",
+    "PeriodSeconds": 10
+  },
+  "Logging": {
+    "LogLevel": {
+      "Default": "Information",
+      "Microsoft": "Warning"
+    }
+  }
+}
+```
