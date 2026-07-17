@@ -1336,6 +1336,8 @@ dotnet add package Microsoft.Extensions.Hosting
 dotnet add package Microsoft.Extensions.Options
 ```
 
+---
+
 **Шаг 2 Смотрим внимательно структуру проекта**
 
 ```bash
@@ -1354,6 +1356,8 @@ FolderMonitor/
     └── ConfigurationHelper.cs           # Методы для сохранения настроек в appsettings.json
 ```
 
+---
+
 **Шаг 3 определяем модель конфигурации**
 
 `Models/MonitorConfig.cs`
@@ -1367,6 +1371,8 @@ public class MonitorConfig
     public int PeriodSeconds { get; set; } = 10;             // Интервал сканирования (сек)
 }
 ```
+
+---
 
 **Шаг 4 переводим модель в конфигурацию**
 
@@ -1386,3 +1392,329 @@ public class MonitorConfig
   }
 }
 ```
+
+---
+
+**Шаг 5. Регистрируем в DI сервисы для API и фоновый сервис**
+
+`Program.cs`
+
+```c#
+using FolderMonitor.Models;
+using FolderMonitor.Services;
+
+var builder = WebApplication.CreateBuilder(args);
+
+// 1. Регистрация MonitorConfig в DI (чтобы можно было внедрять IOptionsMonitor<MonitorConfig>)
+builder.Services.Configure<MonitorConfig>(
+    builder.Configuration.GetSection("MonitorConfig")
+);
+
+// 2. Регистрация фонового сервиса
+builder.Services.AddHostedService<FileSystemMonitorService>();
+
+// 3. Регистрация контроллеров
+builder.Services.AddControllers();
+
+// 4. OpenAPI для отладки
+builder.Services.AddOpenApi();
+
+var app = builder.Build();
+
+if (app.Environment.IsDevelopment())
+{
+    app.MapOpenApi();
+}
+
+app.MapControllers();
+
+app.Run();
+```
+
+---
+
+**Шаг 6. Создаём фоновый сервис**
+
+`Services/FileSystemMonitorService.cs`
+
+```c#
+using FolderMonitor.Models;
+using Microsoft.Extensions.Options;
+
+namespace FolderMonitor.Services;
+
+public class FileSystemMonitorService : BackgroundService
+{
+    private readonly ILogger<FileSystemMonitorService> _logger;
+    private readonly IOptionsMonitor<MonitorConfig> _monitorConfig;
+    private readonly IHostEnvironment _hostEnvironment;
+
+    // История изменений (для примера — храним последнюю запись)
+    private string _lastSnapshot = string.Empty;
+
+    public FileSystemMonitorService(
+        ILogger<FileSystemMonitorService> logger,
+        IOptionsMonitor<MonitorConfig> monitorConfig,
+        IHostEnvironment hostEnvironment)
+    {
+        _logger = logger;
+        _monitorConfig = monitorConfig;
+        _hostEnvironment = hostEnvironment;
+    }
+
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    {
+        _logger.LogInformation("FileSystemMonitorService запущен");
+
+        // Получаем начальную конфигурацию
+        var config = _monitorConfig.CurrentValue;
+        string fullPath = Path.Combine(_hostEnvironment.ContentRootPath, config.FolderPath);
+        int periodMs = config.PeriodSeconds * 1000;
+
+        // Убедимся, что папка существует
+        Directory.CreateDirectory(fullPath);
+
+        // Используем PeriodicTimer для циклического выполнения
+        using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(periodMs));
+
+        while (await timer.WaitForNextTickAsync(stoppingToken))
+        {
+            try
+            {
+                // Считываем актуальную конфигурацию на каждой итерации
+                var currentConfig = _monitorConfig.CurrentValue;
+                
+                // Если конфигурация изменилась (например, папка), обновляем путь
+                string currentFullPath = Path.Combine(_hostEnvironment.ContentRootPath, currentConfig.FolderPath);
+                Directory.CreateDirectory(currentFullPath);
+
+                // Если изменился период, пересоздаём таймер
+                int currentPeriodMs = currentConfig.PeriodSeconds * 1000;
+                if (currentPeriodMs != periodMs || currentFullPath != fullPath)
+                {
+                    periodMs = currentPeriodMs;
+                    fullPath = currentFullPath;
+                    _logger.LogInformation("Конфигурация обновлена: папка {FolderPath}, период {Period}с", fullPath, currentConfig.PeriodSeconds);
+                    
+                    // Пересоздаём таймер с новым интервалом
+                    timer.Period = TimeSpan.FromMilliseconds(periodMs);
+                }
+
+                // ---- Сканирование папки ----
+                var snapshot = GetDirectorySnapshot(fullPath);
+                
+                if (string.IsNullOrEmpty(_lastSnapshot))
+                {
+                    _lastSnapshot = snapshot;
+                    _logger.LogInformation("Первый снэпшот создан для папки {FolderPath}", fullPath);
+                    continue;
+                }
+
+                if (snapshot != _lastSnapshot)
+                {
+                    _logger.LogInformation("Обнаружены изменения в папке {FolderPath}", fullPath);
+                    _logger.LogInformation("--- Новый снэпшот: ---");
+                    _logger.LogInformation(snapshot);
+                    _lastSnapshot = snapshot;
+                }
+                else
+                {
+                    _logger.LogDebug("Изменений в папке {FolderPath} не обнаружено", fullPath);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Ошибка при сканировании папки");
+            }
+        }
+
+        _logger.LogInformation("FileSystemMonitorService остановлен");
+    }
+
+    private string GetDirectorySnapshot(string path)
+    {
+        var dirInfo = new DirectoryInfo(path);
+        var entries = dirInfo.GetFileSystemInfos();
+        
+        var result = new List<string>();
+        foreach (var entry in entries)
+        {
+            if (entry is FileInfo file)
+            {
+                result.Add($"Файл: {file.Name}, Размер: {file.Length}, Изменён: {file.LastWriteTime}");
+            }
+            else if (entry is DirectoryInfo subDir)
+            {
+                result.Add($"Папка: {subDir.Name}, Изменена: {subDir.LastWriteTime}");
+            }
+        }
+
+        // Добавляем мета-информацию
+        result.Insert(0, $"--- Снэпшот от {DateTime.Now:yyyy-MM-dd HH:mm:ss} ---");
+        result.Add($"Всего элементов: {entries.Length}");
+
+        return string.Join(Environment.NewLine, result);
+    }
+}
+```
+
+**Шаг 7. Добавляем API**
+
+`Controller/MonitorController.cs`
+
+```c#
+using FolderMonitor.Models;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Options;
+
+namespace FolderMonitor.Controllers;
+
+[ApiController]
+[Route("api/[controller]")]
+public class MonitorController : ControllerBase
+{
+    private readonly IOptionsMonitor<MonitorConfig> _monitorConfig;
+    private readonly IOptions<MonitorConfig> _staticConfig;
+    private readonly IConfiguration _configuration;
+    private readonly IWebHostEnvironment _environment;
+    private readonly ILogger<MonitorController> _logger;
+
+    public MonitorController(
+        IOptionsMonitor<MonitorConfig> monitorConfig,
+        IOptions<MonitorConfig> staticConfig,
+        IConfiguration configuration,
+        IWebHostEnvironment environment,
+        ILogger<MonitorController> logger)
+    {
+        _monitorConfig = monitorConfig;
+        _staticConfig = staticConfig;
+        _configuration = configuration;
+        _environment = environment;
+        _logger = logger;
+    }
+
+    // GET: api/monitor/config
+    [HttpGet("config")]
+    public IActionResult GetConfig()
+    {
+        var config = _monitorConfig.CurrentValue;
+        return Ok(new
+        {
+            config.FolderPath,
+            config.PeriodSeconds,
+            Environment = _environment.EnvironmentName,
+            FullPath = Path.Combine(_environment.ContentRootPath, config.FolderPath)
+        });
+    }
+
+    // POST: api/monitor/config/runtime
+    // Меняет настройки только в памяти (для текущего запуска)
+    [HttpPost("config/runtime")]
+    public IActionResult UpdateRuntime([FromBody] MonitorConfig newConfig)
+    {
+        // IOptionsMonitor нельзя обновить напрямую. 
+        // Мы используем обходной путь: обновляем IConfiguration в памяти.
+        // В реальном проекте лучше использовать отдельный класс-хранилище настроек.
+        // Но для демонстрации подхода - записываем в appsettings.json и перезагружаем.
+        
+        // Получаем текущий путь к файлу конфигурации
+        var configPath = Path.Combine(_environment.ContentRootPath, "appsettings.json");
+        
+        // Читаем текущий JSON
+        var json = System.IO.File.ReadAllText(configPath);
+        var configJson = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, object>>(json);
+        
+        // Обновляем секцию MonitorConfig
+        var monitorSection = new Dictionary<string, object>
+        {
+            ["FolderPath"] = newConfig.FolderPath,
+            ["PeriodSeconds"] = newConfig.PeriodSeconds
+        };
+        
+        configJson["MonitorConfig"] = monitorSection;
+        
+        // Записываем обратно
+        var updatedJson = System.Text.Json.JsonSerializer.Serialize(configJson, new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
+        System.IO.File.WriteAllText(configPath, updatedJson);
+        
+        // Перезагружаем конфигурацию (чтобы IOptionsMonitor подхватил изменения)
+        // В .NET 6+ используется reloadOnChange: true по умолчанию, но мы можем явно вызвать перезагрузку
+        // Для простоты: используем IConfiguration и его свойство ReloadOnChange
+        // Это работает, если в builder добавлено .AddJsonFile("appsettings.json", optional: false, reloadOnChange: true)
+        
+        _logger.LogInformation("Конфигурация обновлена: папка {FolderPath}, период {Period}с", newConfig.FolderPath, newConfig.PeriodSeconds);
+        
+        return Ok(new 
+        { 
+            Message = "Runtime configuration updated", 
+            Config = newConfig 
+        });
+    }
+
+    // POST: api/monitor/config/persistent
+    // Сохраняет настройки в appsettings.json (для перезапуска)
+    [HttpPost("config/persistent")]
+    public IActionResult UpdatePersistent([FromBody] MonitorConfig newConfig)
+    {
+        // Тот же код, что и выше, но без перезагрузки (или с перезагрузкой - разницы нет)
+        var configPath = Path.Combine(_environment.ContentRootPath, "appsettings.json");
+        var json = System.IO.File.ReadAllText(configPath);
+        var configJson = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, object>>(json);
+        
+        var monitorSection = new Dictionary<string, object>
+        {
+            ["FolderPath"] = newConfig.FolderPath,
+            ["PeriodSeconds"] = newConfig.PeriodSeconds
+        };
+        
+        configJson["MonitorConfig"] = monitorSection;
+        var updatedJson = System.Text.Json.JsonSerializer.Serialize(configJson, new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
+        System.IO.File.WriteAllText(configPath, updatedJson);
+        
+        _logger.LogInformation("Конфигурация сохранена для перезапуска: папка {FolderPath}, период {Period}с", newConfig.FolderPath, newConfig.PeriodSeconds);
+        
+        return Ok(new 
+        { 
+            Message = "Persistent configuration saved. Changes will apply after restart.", 
+            Config = newConfig 
+        });
+    }
+
+    // POST: api/monitor/config/apply
+    // Объединяет оба метода: применяет сейчас и сохраняет для перезапуска
+    [HttpPost("config/apply")]
+    public IActionResult ApplyConfig([FromBody] MonitorConfig newConfig)
+    {
+        // Сначала применяем runtime (перезагружаем конфиг)
+        // Используем тот же код, что и в UpdateRuntime
+        var configPath = Path.Combine(_environment.ContentRootPath, "appsettings.json");
+        var json = System.IO.File.ReadAllText(configPath);
+        var configJson = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, object>>(json);
+        
+        var monitorSection = new Dictionary<string, object>
+        {
+            ["FolderPath"] = newConfig.FolderPath,
+            ["PeriodSeconds"] = newConfig.PeriodSeconds
+        };
+        
+        configJson["MonitorConfig"] = monitorSection;
+        var updatedJson = System.Text.Json.JsonSerializer.Serialize(configJson, new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
+        System.IO.File.WriteAllText(configPath, updatedJson);
+        
+        // Перезагрузка происходит автоматически благодаря reloadOnChange: true
+        // Но для уверенности можно принудительно вызвать перезагрузку, если есть доступ к IConfigurationRoot
+        // В данном случае мы просто полагаемся на IOptionsMonitor, который подхватит изменения
+        
+        _logger.LogInformation("Конфигурация применена сейчас и сохранена для перезапуска: папка {FolderPath}, период {Period}с", newConfig.FolderPath, newConfig.PeriodSeconds);
+        
+        return Ok(new 
+        { 
+            Message = "Configuration applied now and saved for restart", 
+            Config = newConfig 
+        });
+    }
+}
+```
+
+Важное уточнение: в коде выше используется запись в `appsettings.json`. Это работает, но есть нюанс: при перезаписи файла теряются комментарии и форматирование. Для продакшена лучше использовать отдельный файл конфигурации (например, `appsettings.custom.json`). Для демонстрации подхода — оставляем как есть.
+
