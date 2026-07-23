@@ -130,6 +130,7 @@
 - [100 - LINQ](./Middle/100-LINQ.md)
 - [110 - Entity Framework Core](./Middle/110-EFCore.md)
 - [120 - ASP.NET Core Web API](./Middle/120-ASPNETAPI.md)
+- [130 - Тестирование (xUnit, Moq)](./Middle/130-Тестирование.md)
 
 ---
 
@@ -144,7 +145,6 @@
 
 Эти темы уже есть в `README.md` и ждут своего часа. Они будут добавлены в соответствующие разделы после того, как я создам для них файлы.
 
-- [130 - Тестирование (xUnit, Moq)](./Middle/130-Тестирование.md)
 - [Логирование (Serilog)](./Middle/140-Логирование.md)
 - [Кэширование (MemoryCache, Redis)](./Middle/150-Кэширование.md)
 - [Фоновые задачи (BackgroundService, Hangfire)](./Middle/160-Сервисы.md)
