@@ -131,6 +131,7 @@
 - [110 - Entity Framework Core](./Middle/110-EFCore.md)
 - [120 - ASP.NET Core Web API](./Middle/120-ASPNETAPI.md)
 - [130 - Тестирование (xUnit, Moq)](./Middle/130-Тестирование.md)
+- [140 - Логирование (Serilog)](./Middle/140-Логирование.md)
 
 ---
 
@@ -145,22 +146,22 @@
 
 Эти темы уже есть в `README.md` и ждут своего часа. Они будут добавлены в соответствующие разделы после того, как я создам для них файлы.
 
-- [Логирование (Serilog)](./Middle/140-Логирование.md)
-- [Кэширование (MemoryCache, Redis)](./Middle/150-Кэширование.md)
-- [Фоновые задачи (BackgroundService, Hangfire)](./Middle/160-Сервисы.md)
-- [Проекты (структура `.sln` / `.csproj`)](./Senior/020-УправлениеПроектами.md)
-- [Git и GitHub workflow](./Senior/030-GitWorkflow.md)
-- [NuGet](./Senior/040-NuGet.md)  
-- [Модель памяти .NET (Stack, Managed/Unmanaged Heap, барьеры)](./Senior/050-МодельПамяти.md)
-- [Продвинутая отладка и профилирование](./Senior/060-ОтладкаПрофилирование.md)
-- [Безопасность в .NET (криптография, защита от атак)](./Senior/070-Безопасность.md)
-- [Микросервисы (gRPC, Message Queues)](./Senior/080-Микросервисы.md)
-- [Контейнеризация и оркестрация (Docker, Kubernetes — основы)](./Senior/090-Контейнеризация.md)
-- [Наблюдаемость (Prometheus, OpenTelemetry)](./Senior/100-Мониторинг.md)
-- [Авторизация (JWT, OAuth2)](./Senior/110-Авторизация.md)
-- [Профилирование и оптимизация производительности](./Senior/120-ПродвинутоеПрофилированиеИОптимизация.md)
-- [Blazor WASM](./Senior/130-Blazor.md)
-- [SourceGenerators](./Senior/140-SourceGenerators.md)
+
+- [150 - Кэширование (MemoryCache, Redis)](./Middle/150-Кэширование.md)
+- [160 - Фоновые задачи (BackgroundService, Hangfire)](./Middle/160-Сервисы.md)
+- [020 - Проекты (структура `.sln` / `.csproj`)](./Senior/020-УправлениеПроектами.md)
+- [030 - Git и GitHub workflow](./Senior/030-GitWorkflow.md)
+- [040 - NuGet](./Senior/040-NuGet.md)  
+- [050 - Модель памяти .NET (Stack, Managed/Unmanaged Heap, барьеры)](./Senior/050-МодельПамяти.md)
+- [060 - Продвинутая отладка и профилирование](./Senior/060-ОтладкаПрофилирование.md)
+- [070 - Безопасность в .NET (криптография, защита от атак)](./Senior/070-Безопасность.md)
+- [080 - Микросервисы (gRPC, Message Queues)](./Senior/080-Микросервисы.md)
+- [090 - Контейнеризация и оркестрация (Docker, Kubernetes — основы)](./Senior/090-Контейнеризация.md)
+- [100 - Наблюдаемость (Prometheus, OpenTelemetry)](./Senior/100-Мониторинг.md)
+- [110 - Авторизация (JWT, OAuth2)](./Senior/110-Авторизация.md)
+- [120 - Профилирование и оптимизация производительности](./Senior/120-ПродвинутоеПрофилированиеИОптимизация.md)
+- [130 - Blazor WASM](./Senior/130-Blazor.md)
+- [140 - SourceGenerators](./Senior/140-SourceGenerators.md)
 
 ---
 
