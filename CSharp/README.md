@@ -163,6 +163,7 @@
 - [120 - ASP.NET Core Web API](./Middle/120-ASPNETAPI.md)
 - [130 - Тестирование (xUnit, Moq)](./Middle/130-Тестирование.md)
 - [140 - Логирование (Serilog)](./Middle/140-Логирование.md)
+- [150 - Кэширование (MemoryCache, Redis)](./Middle/150-Кэширование.md)
 
 ---
 
@@ -177,8 +178,6 @@
 
 Эти темы уже есть в `README.md` и ждут своего часа. Они будут добавлены в соответствующие разделы после того, как я создам для них файлы.
 
-
-- [150 - Кэширование (MemoryCache, Redis)](./Middle/150-Кэширование.md)
 - [160 - Фоновые задачи (BackgroundService, Hangfire)](./Middle/160-Сервисы.md)
 - [020 - Проекты (структура `.sln` / `.csproj`)](./Senior/020-УправлениеПроектами.md)
 - [030 - Git и GitHub workflow](./Senior/030-GitWorkflow.md)
