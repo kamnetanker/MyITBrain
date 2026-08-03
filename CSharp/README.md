@@ -186,7 +186,7 @@
 Эти темы уже есть в `README.md` и ждут своего часа. Они будут добавлены в соответствующие разделы после того, как я создам для них файлы.
 
 - [020 - Проекты (структура `.sln` / `.csproj`)](./Senior/020-УправлениеПроектами.md)
-- [030 - Git и GitHub workflow](./Senior/030-GitWorkflow.md)
+- [030 - Git и GitHub workflow, CI/CD](./Senior/030-GitWorkflowCI.CD.md)
 - [040 - NuGet](./Senior/040-NuGet.md)  
 - [050 - Модель памяти .NET (Stack, Managed/Unmanaged Heap, барьеры)](./Senior/050-МодельПамяти.md)
 - [060 - Продвинутая отладка и профилирование](./Senior/060-ОтладкаПрофилирование.md)
