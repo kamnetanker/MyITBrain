@@ -421,4 +421,4 @@ ServiceManager/
 
 # Текущая работа
 
-#
+## Git и GitHub workflow, CI/CD
