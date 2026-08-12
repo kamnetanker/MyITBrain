@@ -788,6 +788,17 @@ git log --oneline
 git log --graph
 # --decorate добавляет читабельности
 git log --graph --decorate
+# Базовый древовидный вывод с указанием веток и сокращённых хешей
+git log --graph --oneline --decorate
+
+# Более детальный с датами и авторами
+git log --graph --pretty=format:'%Cred%h%Creset - %s %Cgreen(%cr) %C(bold blue)<%an>%Creset' --abbrev-commit
+
+# Показать все ветки в дереве
+git log --graph --oneline --decorate --all
+
+# Ограничить количество коммитов (например, последние 20)
+git log --graph --oneline --decorate -20
 
 # Найти коммит, который сломал тесты
 git bisect start
