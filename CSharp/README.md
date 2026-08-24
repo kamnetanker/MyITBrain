@@ -1161,3 +1161,417 @@ jobs:
           push: true
           tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
 ```
+
+## Docker-compose и деплой на сервер
+
+**Установка Docker-compose** 
+
+```bash
+# Обновляем список пакетов
+sudo apt update
+
+# Устанавливаем Docker и плагин Compose
+sudo apt install -y docker.io docker-compose-plugin
+```
+
+Для запуска сервиса из контейнера требуется написать `docker-compose.yml`:
+
+```yaml
+# ============================================================
+# Версия формата Compose (используй 3.8 для новых фич)
+# ============================================================
+version: '3.8'
+
+# ============================================================
+# Описание сервисов (контейнеров)
+# ============================================================
+services:
+  # -------- Веб-приложение (API) --------
+  web:
+    # Имя образа для скачивания или сборки
+    image: myapp:latest
+
+    # Пробрасываем порты: хост:контейнер
+    # Порт 8080 на хосте → порт 8080 внутри контейнера (ASPNETCORE_URLS)
+    ports:
+      - "8080:8080"
+
+    # Переменные окружения, передаваемые в контейнер
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Production   # Режим работы приложения
+
+    # Политика перезапуска: unless-stopped — не перезапускать, если остановлен вручную
+    restart: unless-stopped
+
+  # -------- База данных PostgreSQL --------
+  postgres:
+    image: postgres:15          # Официальный образ PostgreSQL 15
+
+    # Переменные для настройки БД
+    environment:
+      - POSTGRES_USER=myapp     # Имя пользователя БД
+      - POSTGRES_PASSWORD=mysecret  # Пароль (в реальности — секрет)
+
+    # Тома для сохранения данных (чтобы не потерять при перезапуске)
+    volumes:
+      - pgdata:/var/lib/postgresql/data   # Именованный том pgdata
+
+# ============================================================
+# Описание томов (для хранения данных вне контейнера)
+# ============================================================
+volumes:
+  pgdata:   # Том для PostgreSQL — данные сохраняются между запусками
+```
+
+Чтобы управлять запуском используются следующие команды:
+
+```bash
+# Запустить все сервисы в фоновом режиме
+docker compose up -d
+
+# Остановить и удалить контейнеры (тома остаются)
+docker compose down
+
+# Посмотреть логи всех сервисов
+docker compose logs
+
+# Перезапустить только веб-сервис (без остановки БД)
+docker compose restart web
+```
+
+**Как должен выглядеть автодеплой с Docker Compose**
+
+Схема простая:
+
+* Gitea Actions собирает Docker-образ и пушит его в реестр (Docker Hub, GHCR или локальный).
+* Gitea Actions подключается к серверу по SSH и выполняет команды:
+* docker pull — скачать новый образ.
+* docker compose up -d — перезапустить сервисы с новым образом.
+
+**Пример workflow для Gitea Actions**
+
+```yaml
+# ============================================================
+# Workflow: CI/CD с автодеплоем через Docker Compose
+# ============================================================
+name: Deploy with Docker Compose
+
+on:
+  push:
+    branches: [main]   # Деплой только при пуше в main
+
+env:
+  REGISTRY: docker.io
+  IMAGE_NAME: myapp
+  SERVER_HOST: ${{ secrets.SERVER_HOST }}   # IP или домен сервера
+  SERVER_USER: ${{ secrets.SERVER_USER }}   # Имя пользователя на сервере
+
+jobs:
+  # -------- Job 1: Тестирование --------
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+
+      - name: Restore dependencies
+        run: dotnet restore
+
+      - name: Run tests
+        run: dotnet test --no-restore --verbosity normal
+
+  # -------- Job 2: Сборка и пуш образа --------
+  build:
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+
+  # -------- Job 3: Автодеплой на сервер через SSH --------
+  deploy:
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_SSH_KEY }}   # Приватный SSH-ключ
+          script: |
+            # Переходим в папку с проектом
+            cd /opt/myapp
+
+            # Скачиваем свежий образ
+            docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+
+            # Перезапускаем сервисы (только те, у которых изменился образ)
+            docker compose up -d --no-deps --force-recreate web
+
+            # Очищаем неиспользуемые образы
+            docker image prune -f
+```
+
+**Что нужно настроить на сервере**
+
+* Установить Docker и Docker Compose.
+* Создать папку для проекта, например /opt/myapp, и положить туда docker-compose.yml.
+* Сгенерировать SSH-ключ и добавить публичный ключ в ~/.ssh/authorized_keys на сервере.
+* Добавить секреты в Gitea:
+  * SERVER_HOST — IP или домен сервера.
+  * SERVER_USER — имя пользователя (например, deploy).
+  * SERVER_SSH_KEY — приватный SSH-ключ.
+  * DOCKER_USERNAME и DOCKER_PASSWORD — для доступа к Docker Hub.
+
+**Ограничения**
+
+Для большой команды и корпоративной среды данный подход не является оптимальным как минимум по причине отсутствия возможности отката и передачи ssh ключа от прод сервера на откуп секретам Gitea, поэтому так делать не надо, но для соло и малых команд разработки - это просто и эффективно решает задачи, а что решает задачи - приносит деньги.
+
+## Minikube — локальный Kubernetes
+
+`Minikube` — локальный Kubernetes-кластер для разработки и тестирования.
+
+Пример установки Minikube на x64 систему:
+
+```bash
+# ============================================================
+# Установка Minikube
+# ============================================================
+curl -LO https://storage.googleapis.com/minikube/releases/latest/minikube-linux-amd64
+sudo install minikube-linux-amd64 /usr/local/bin/minikube
+
+# ============================================================
+# Запуск кластера (используем драйвер Docker)
+# ============================================================
+minikube start --driver=docker
+
+# ============================================================
+# Установка kubectl (инструмент управления Kubernetes)
+# ============================================================
+curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+sudo install kubectl /usr/local/bin/kubectl
+```
+
+Каждый проект, развёрнутый в k8s состоит из 3-х манифестов:
+
+```bash
+k8s/
+├── deployment.yaml    # Описание подов (контейнеров)
+├── service.yaml       # Описание доступа к сервису
+└── ingress.yaml       # Описание внешнего доступа (опционально)
+```
+
+Проекты и среды исполнения могут разделяться посредством `namespace` и проекты в разных `namespace` могут быть изолированы друг от друга, иметь разные переменные окружения и версии ПО.
+
+```bash
+# Создаём два namespace: test и prod
+kubectl create namespace test
+kubectl create namespace prod
+```
+
+Далее рассмотрим деплой по пушу в k8s из Gitea репозитория
+
+`service.yaml` test среды:
+
+```yaml
+# ============================================================
+# Service — определяет доступ к подам
+# ============================================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: myapp-service
+  namespace: test          # Принадлежит namespace test
+spec:
+  # ClusterIP — доступен только внутри кластера
+  # Это безопасно для тестового окружения
+  type: ClusterIP
+
+  # Селектор — к каким подам направлять трафик
+  selector:
+    app: myapp             # Только поды с меткой app=myapp
+
+  # Проброс портов
+  ports:
+    - port: 80             # Порт внутри кластера
+      targetPort: 8080     # Порт внутри контейнера
+```
+
+`service.yaml` prod среды:
+
+```yaml
+# ============================================================
+# Service для продакшена — доступен извне
+# ============================================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: myapp-service
+  namespace: prod          # Отдельный namespace для прода
+spec:
+  # LoadBalancer — создаёт внешний IP для доступа из интернета
+  type: LoadBalancer
+
+  selector:
+    app: myapp             # Те же поды, но в другом namespace
+
+  ports:
+    - port: 80
+      targetPort: 8080
+```
+
+Проверка:
+
+```bash
+# Для test-окружения — пробросить порт локально
+kubectl port-forward service/myapp-service 8080:80 -n test
+
+# Для prod — получить внешний IP
+minikube service myapp-service -n prod --url
+```
+
+Чтобы Gitea могла деплоить в кластер изменения в контейнерах, требуется настроить доступ к кластеру, для этого необходимо получить Base64 строку параметров подключения: `kubectl config view --raw > kubeconfig` и полученное значение записать в переменную `KUBE_CONFIG_DATA` и написать следующий пайплайн:
+
+```yaml
+# ============================================================
+# Имя workflow (отображается в интерфейсе Gitea)
+# ============================================================
+name: CI/CD Pipeline
+
+# ============================================================
+# Триггеры — когда запускать
+# ============================================================
+on:
+  push:
+    branches:
+      - main          # Пуш в main → деплой в prod
+      - develop       # Пуш в develop → деплой в test
+
+# ============================================================
+# Глобальные переменные окружения
+# ============================================================
+env:
+  REGISTRY: docker.io               # Реестр Docker
+  IMAGE_NAME: myapp                 # Имя образа
+
+jobs:
+  # -------- Job 1: Тестирование (общий для всех веток) --------
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+
+      - name: Restore dependencies
+        run: dotnet restore
+
+      - name: Run tests
+        run: dotnet test --no-restore --verbosity normal
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: ./TestResults/
+
+  # -------- Job 2: Сборка Docker-образа --------
+  build:
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+
+  # -------- Job 3: Деплой в test (только для develop) --------
+  deploy-test:
+    runs-on: ubuntu-latest
+    needs: build
+    # Запускается только для пуша в develop
+    if: github.ref == 'refs/heads/develop'
+    steps:
+      # Восстанавливаем kubeconfig из секрета
+      - name: Set kubeconfig
+        run: echo "${{ secrets.KUBE_CONFIG_DATA }}" | base64 -d > kubeconfig
+
+      # Обновляем образ в deployment и ждём завершения
+      - name: Deploy to test namespace
+        run: |
+          export KUBECONFIG=kubeconfig
+          kubectl set image deployment/myapp myapp=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }} -n test
+          kubectl rollout status deployment/myapp -n test
+
+  # -------- Job 4: Деплой в prod (только для main) --------
+  deploy-release:
+    runs-on: ubuntu-latest
+    needs: build
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - name: Set kubeconfig
+        run: echo "${{ secrets.KUBE_CONFIG_DATA }}" | base64 -d > kubeconfig
+
+      - name: Deploy to prod namespace
+        run: |
+          export KUBECONFIG=kubeconfig
+          kubectl set image deployment/myapp myapp=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }} -n prod
+          kubectl rollout status deployment/myapp -n prod
+```
+
+После этого при изменении релизных версий контейнера он автоматически будет обновляться в запущенных подах. 
+
+## Деплой с Helm (декларативный подход)
+
+`Helm` — пакетный менеджер для Kubernetes. Он упаковывает манифесты в чарт (шаблонизированный набор YAML-файлов). Позволяет управлять версиями деплоя, откатами и настройками для разных сред.
+
+Установка:
+
+```bash
+curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+```
+
+Более подробно тема сборки контейнеров, доставки, развёртывания со всеми конфигурационными файлами будет [рассмотрена](../../DevOps/Docker.md) в DevOps ветке репозитория
