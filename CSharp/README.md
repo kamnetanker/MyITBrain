@@ -840,3 +840,324 @@ packages/
 *.log
 ```
 
+## Gitea Actions и как это работает
+
+`Workflow` - пайплайн, т.е. набор шагов, предписывающих Gitea Actions что делать с кодом в репозитории.
+
+`Event` - событие, которое запускает `workflow` (`push`, `pull_request`, `merge`)
+
+`Job` - набор шагов, выполняемых на некотором узле исполнителе с кодом в ответ на `Event`
+
+`Runner`- исполнитель `Job`, можно сказать вJOBыватель.
+
+`Step` - команда или действие например `dotnet test` или `actions/checkout@v4`
+
+`Action` - готовый скрипт/плагин для переиспользования в `Step` (например `actions/checkout@v4`)
+
+**Как это устроено внутри**
+
+Gitea Actions состоит из трёх компонентов
+
+1. `Gitea Server` - хранит workflow-файлы, управляет запуском 
+2. `Runner` (`act_runner`) - вJOBыватель
+3. `Act` - движок, который интерпретирует `workflow` и выполняет шаги `Step`
+
+Gitea Actions совместим с Github Actions, но имеет различия с ним
+
+* Путь к **Workflow**: **Github**: `.github/workflows/` **Gitea**: `.gitea/workflows/`
+* Контекстные переменные: **Github**: `github.*` и **Gitea**: `gitea.*`
+* Некоторые `actions` работают иначе и нужно сверять совместимость и тестировать. 
+
+## Gitea Actions и Runner
+
+Для Gitea 1.21 и выше actions включены по умолчанию. Если используется более старая версия, необходимо в `/data/gitea/conf/app.ini` добавить секцию:
+
+```ini
+[actions]
+ENABLED = true
+```
+
+После этого перезапустить Gitea
+
+**Далее необходимо получить токен для Runner**
+
+* На уровне инстанса: `http://localhost:3000/admin/actions/runners`
+* На уровне организации: `http://localhost:3000/<org>/settings/actions/runners`
+* На уровне репозитория: `http://localhost:3000/<owner>/<repo>/settings/actions/runners`
+
+Токен выглядит как случайная строка: `P2U1U0oB4XaRCi8azcngmPCLbRpUGapalhmddh23`
+
+## Регистрация Runner
+
+**Ручной способ**
+
+`./act_runner register` - данный скрипт попросит параметры:
+
+* URL инстанса Gitea (например, http://192.168.8.8:3000/) — не используй localhost или 127.0.0.1
+* Токен инстанса
+* Имя раннера (не обязательно)
+* Метки раннера (не обязательно)
+
+Не интерактивная регистрация в одну команду:
+
+`./act_runner register --no-interactive --instance http://192.168.8.8:3000 --token <токен>`
+
+**Docker Runner**
+
+```bash
+docker run -d \
+  --name=gitea-runner \
+  -e GITEA_INSTANCE_URL=http://gitea:3000 \
+  -e GITEA_RUNNER_REGISTRATION_TOKEN=<токен> \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  gitea/act_runner:latest
+```
+
+* `GITEA_INSTANCE_URL` — адрес твоей Gitea.
+* `GITEA_RUNNER_REGISTRATION_TOKEN` — токен, полученный на предыдущем шаге.
+* `-v /var/run/docker.sock` — позволяет runner запускать контейнеры внутри Docker (нужно для изоляции шагов).
+* После регистрации runner запустится автоматически
+
+Внутри админки Gitea runner будет `online` 
+
+## Структура и синтаксис workflow-файла
+
+В каждом репозитории Workflow файлы свои собственные и находятся в `.gitea/workflows/`
+
+Базовая структура YAML-файла:
+
+```yaml
+# Имя workflow (отображается в интерфейсе)
+name: CI/CD Pipeline
+
+# События, которые запускают workflow
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+# Переменные окружения (доступны во всех jobs)
+env:
+  DOTNET_VERSION: '9.0.x'
+
+# Jobs — выполняются параллельно, если не указано needs
+jobs:
+  # Job 1: Тестирование
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code # По сути получение в runner кода проекта. 
+        uses: actions/checkout@v4
+
+      - name: Setup .NET # установка dotnet указанной в env версии.
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Restore dependencies # запуск конкретных команд
+        run: dotnet restore
+
+      - name: Run tests
+        run: dotnet test --no-restore --verbosity normal
+
+  # Job 2: Сборка (запускается только после успешного test)
+  build:
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - name: Build
+        run: dotnet build --configuration Release --no-restore
+```
+
+## Gitea-специфичные контекстные переменные
+
+Вместо `github.*` в **Gitea Actions** используется `gitea.*`:
+
+Переменная - Что содержит
+`${{ gitea.event_name }}`	Тип события (push, pull_request и т.д.)
+`${{ gitea.ref }}`	Ветка или тег (например, refs/heads/main)
+`${{ gitea.sha }}`	Хеш коммита
+`${{ gitea.repository }}`	Имя репозитория (owner/repo)
+`${{ gitea.actor }}`	Имя пользователя, запустившего workflow
+`${{ gitea.run_id }}`	Уникальный ID запуска
+`${{ gitea.run_number }}`	Номер запуска (инкрементируется)
+`${{ gitea.server_url }}`	URL Gitea-сервера
+`${{ gitea.api_url }}`	URL API Gitea
+
+## Секреты — безопасное хранение паролей и ключей
+
+**Секреты** — это зашифрованные переменные, которые хранятся в **Gitea** и подставляются в **workflow** во время **выполнения**. Они нужны для:
+
+* **Логинов** и **паролей** в **Docker Hub**.
+* **SSH-ключей** для доступа к серверу.
+* **API-токенов** для внешних сервисов.
+
+**Важно**: секреты не видны в логах и не доступны через API после создания
+
+Секреты можно создавать на трёх уровнях:
+
+* **Репозиторий** — доступны только для этого репозитория.
+* **Организация** — доступны для всех репозиториев организации.
+* **Инстанс** — глобальные секреты для всех репозиториев (не поддерживается напрямую)
+
+**Как создать секрет в Gitea?**
+
+* Открой репозиторий в Gitea.
+* Перейди в Settings → Secrets.
+* Нажми Add Secret.
+* Введи имя (например, DOCKER_USERNAME) и значение.
+
+**Как использовать секрет в workflow?**
+
+```yaml
+steps:
+  - name: Log in to Docker Hub
+    run: echo "${{ secrets.DOCKER_PASSWORD }}" | docker login -u "${{ secrets.DOCKER_USERNAME }}" --password-stdin
+```
+
+Gitea автоматически подставит значения секретов в secrets контекст
+
+**Правила именования секретов**
+
+* Только буквы, цифры и подчёркивания.
+* Не могут начинаться с `GITHUB_` или `GITEA_`.
+* Не чувствительны к регистру.
+
+## Логи и артефакты — как понять, что происходит
+
+**Где смотреть логи**
+
+Логи каждого запуска доступны в интерфейсе Gitea:
+
+* Открой репозиторий.
+* Перейди в `Actions`.
+* Выбери конкретный запуск.
+* Нажми на любой `job` — увидишь логи каждого шага.
+
+**Что можно найти в логах**
+
+* Успешно ли прошёл `dotnet restore`.
+* Какие тесты упали (и почему).
+* Ошибки сборки **Docker-образа**.
+* Сообщения об ошибках деплоя.
+
+**Включение подробных логов (step-debug)**
+
+```yaml
+env:
+  ACTIONS_STEP_DEBUG: true
+  ACTIONS_RUNNER_DEBUG: true
+```
+
+Это включит дополнительные логи для каждого шага.
+
+**Артефакты — сохранение результатов сборки**
+
+Артефакты — это файлы, которые сохраняются после выполнения workflow (например, результаты тестов, собранные .dll, логи). Их можно скачать через интерфейс Gitea.
+
+Пример сохранения артефакта:
+
+```yaml
+- name: Upload test results
+  uses: actions/upload-artifact@v4
+  with:
+    name: test-results
+    path: ./TestResults/
+```
+
+## Gitea Actions vs GitLab CI — сравнение подходов
+
+**Аспект** - Gitea Actions / GitLab CI
+**Совместимость** - Совместим с GitHub Actions (синтаксис YAML) / Собственный синтаксис YAML
+**Ресурсы** - Лёгкий (~512MB RAM) / Тяжёлый (~4GB RAM)
+**Установка** - Простая, один контейнер / Сложнее, несколько компонентов
+**Экосистема** - Меньше готовых actions / Огромная экосистема, множество готовых шаблонов
+**Зрелость** - Моложе, могут быть баги / Зрелый, проверенный годами
+**Интеграция** - Только Git + CI / «Всё в одном» (Git, CI/CD, реестр, мониторинг)
+**Сложные пайплайны** - Ограничен / Глубокая поддержка
+Вывод:
+
+`Gitea Actions` — для соло-разработчика или малой команды: просто, дёшево, предсказуемо.
+`GitLab CI` — для корпоративных сценариев с кучей интеграций: мощнее, но дороже и сложнее
+
+## Где логи, Тони?
+
+**Что можно получить**	Где / Как
+**Статус каждого шага**: 	Интерфейс Actions → логи шагов
+**Время выполнения каждого шага**: 	Интерфейс Actions → общее время job
+**Ошибки компиляции**: 	Логи шага dotnet build
+**Упавшие тесты**: 	Логи шага dotnet test
+**Переменные окружения**: 	Добавь шаг run: env — выведет все переменные
+**Содержимое файлов**: 	Добавь шаг run: cat path/to/file
+**Секреты**: 	НЕ видны в логах (защищены)
+**Артефакты**: 	Скачать через интерфейс Actions
+
+## Практический пример — полный workflow для .NET-проекта
+
+```yaml
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+env:
+  DOTNET_VERSION: '9.0.x'
+  REGISTRY: docker.io
+  IMAGE_NAME: myapp
+
+jobs:
+  # -------- Job 1: Тестирование --------
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Restore dependencies
+        run: dotnet restore
+
+      - name: Run tests
+        run: dotnet test --no-restore --verbosity normal
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: ./TestResults/
+
+  # -------- Job 2: Сборка Docker-образа --------
+  build:
+    runs-on: ubuntu-latest
+    needs: test
+    if: github.ref == 'refs/heads/main'  # Только для main
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+```
